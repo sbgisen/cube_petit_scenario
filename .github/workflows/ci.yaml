@@ -1,0 +1,24 @@
+on:
+  push:
+    branches: [jazzy-devel]
+  pull_request:
+    types: [opened, synchronize, reopened]
+
+jobs:
+  linter:
+    if: ${{ github.event_name == 'pull_request' }}
+    name: Linter
+    uses: sbgisen/.github/.github/workflows/ros2_style.yaml@main
+  build:
+    needs: linter
+    if: ${{ !failure() }}
+    name: Build
+    uses: sbgisen/.github/.github/workflows/ros2-build.yml@main
+    with:
+      ros_distro: jazzy
+    secrets:
+      ssh_key: ${{ secrets.GISEN_ROBO_GIT }}
+      known_hosts: ${{ secrets.KNOWN_HOSTS }}
+  release-drafter:
+    name: Release drafter
+    uses: sbgisen/.github/.github/workflows/release-drafter.yml@main

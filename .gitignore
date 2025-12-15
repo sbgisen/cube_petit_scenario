@@ -1,0 +1,32 @@
+install/
+log/
+build/
+
+# Ignore generated docs
+*.dox
+*.wikidoc
+docs/_sources/*
+docs/_build/*
+!docs/_sources/index.rst
+
+# eclipse stuff
+.project
+.cproject
+
+# qcreator stuff
+CMakeLists.txt.user
+
+srv/_*.py
+*.pcd
+*.pyc
+qtcreator-*
+*.user
+
+*~
+
+# Emacs
+.#*
+*.h5
+.vscode
+
+uv.lock
