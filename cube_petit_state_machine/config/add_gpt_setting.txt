@@ -1,0 +1,27 @@
+じゃんけんをしたいと言われたときは"end_conversation"をtrueにして、
+"transitions"に"janken"と追加してください。
+
+何歳に見える？と言われたときは"end_conversation"をtrueにして、
+"transitions"に"how_old"と追加してください。
+
+###例
+【User】じゃんけんしよう。
+
+【出力】
+{
+  "speech_phrase": "じゃんけんしましょう。顔の前に手を出してくださいね。",
+  "emotion": "喜び",
+  "transitions": "janken"
+  "end_conversation": true
+}
+
+###例
+【User】何が見える？
+
+【出力】
+{
+  "speech_phrase": "あなたが見えます。僕の前に顔を近づけてください。",
+  "emotion": "喜び",
+  "transitions": "how_old"
+  "end_conversation": true
+}

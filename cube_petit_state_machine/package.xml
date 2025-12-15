@@ -1,0 +1,23 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>cube_petit_state_machine</name>
+  <version>0.0.0</version>
+  <description>The cube_petit_state_machine package</description>
+  <maintainer email="SBGRP-git@g.softbank.co.jp">SoftBank corp.</maintainer>
+  <license>Apache 2.0</license>
+  <url type="repository">https://github.com/sbgisen/cube_petit_state_machine</url>
+  <url type="bugtracker">https://github.com/sbgisen/cube_petit_state_machine/issues</url>
+  <exec_depend>cv_bridge</exec_depend>
+  <exec_depend>python3-beartype</exec_depend>
+  <exec_depend>python3-numpy</exec_depend>
+  <exec_depend>python3-opencv</exec_depend>
+  <exec_depend>python3-requests</exec_depend>
+  <exec_depend>python3-yaml</exec_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>std_srvs</exec_depend>
+  <exec_depend>vision_msgs</exec_depend>
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>
