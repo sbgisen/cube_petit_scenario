@@ -1,0 +1,4 @@
+/**:
+  ros__parameters:
+    base_frame_name: base_link
+    cmd_vel_topic_name: /diff_drive_controller/cmd_vel
