@@ -23,6 +23,8 @@ dependencies = ["numpy<2",
 memory_talk_demo = "memory_talk_demo.memory_talk_demo_node:main"
 voice_embed = "memory_talk_demo.voice_embeddings:main"
 memory_speaker_node = "memory_talk_demo.memory_speaker_node:main"
+user_store_node = "memory_talk_demo.user_store_node:main"
+
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"

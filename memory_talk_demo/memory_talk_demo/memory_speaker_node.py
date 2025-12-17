@@ -16,9 +16,10 @@
 #
 
 import sqlite3
-import time
 from typing import Optional
 
+from cube_petit_interaction_msgs.srv import GetCurrentSpeaker
+from cube_petit_interaction_msgs.srv import RegisterSpeaker
 import numpy as np
 import rclpy
 from rclpy.node import Node
@@ -51,7 +52,48 @@ class SpeakerMemoryNode(Node):
         )
         self._init_db()
 
+        self.last_user_id: Optional[str] = None
+        self.last_confidence: float = 0.0
+        self.last_is_new: bool = True
+        self.create_service(
+            GetCurrentSpeaker,
+            'get_current_speaker',
+            self.handle_get_current_speaker,
+        )
+        self.create_service(
+            RegisterSpeaker,
+            'register_speaker',
+            self.handle_register_speaker,
+        )
+
         self.get_logger().info('SpeakerMemoryNode with persistence started')
+
+    def handle_get_current_speaker(self, request: GetCurrentSpeaker.Request,
+                                   response: GetCurrentSpeaker.Response) -> GetCurrentSpeaker.Response:
+        response.user_id = self.last_user_id or ''
+        response.confidence = self.last_confidence
+        response.is_new = self.last_is_new
+        return response
+
+    def handle_register_speaker(
+        self,
+        request: RegisterSpeaker.Request,
+        response: RegisterSpeaker.Response,
+    ) -> RegisterSpeaker.Response:
+        try:
+            emb = np.array(request.embedding, dtype=np.float32)
+            emb /= np.linalg.norm(emb)
+
+            speaker_id = self._next_speaker_id()
+            self._save_speaker(speaker_id, request.user_id, emb)
+
+            self.get_logger().info(f'Registered speaker for user_id={request.user_id}, speaker_id={speaker_id}')
+            response.success = True
+        except Exception as e:
+            self.get_logger().error(f'Failed to register speaker: {e}')
+            response.success = False
+
+        return response
 
     # ---------------- DB ----------------
 
@@ -104,15 +146,25 @@ class SpeakerMemoryNode(Node):
 
         if best_sim >= self.same_threshold and best_uid is not None:
             confidence = self.similarity_to_confidence(best_sim)
+            self.last_user_id = best_uid
+            self.last_confidence = confidence
+            self.last_is_new = False
+
             self.pub_identity.publish(String(data=best_uid))
             self.pub_confidence.publish(Float32(data=confidence))
             self.get_logger().info(f'Matched user={best_uid}, sim={best_sim:.3f}')
         else:
+            # self.pub_identity.publish(String(data='new'))
+            # self.pub_confidence.publish(Float32(data=0.0))
+            # new_user_id = f'anon_{time.time()}'
+            # self.register_user(new_user_id, emb)
+            # self.get_logger().info('New speaker detected')
+            self.last_user_id = None
+            self.last_confidence = 0.0
+            self.last_is_new = True
             self.pub_identity.publish(String(data='new'))
             self.pub_confidence.publish(Float32(data=0.0))
-            new_user_id = f'anon_{time.time()}'
-            self.register_user(new_user_id, emb)
-            self.get_logger().info('New speaker detected')
+            self.get_logger().info('Unknown speaker detected')
 
     @staticmethod
     def similarity_to_confidence(sim: float) -> float:

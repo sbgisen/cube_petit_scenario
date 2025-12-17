@@ -20,6 +20,7 @@ import time
 from typing import Optional, Protocol
 
 from audio_common_msgs.msg import AudioDataStamped
+from audio_common_msgs.msg import AudioInfo
 import numpy as np
 import onnxruntime as ort
 import rclpy
@@ -88,9 +89,22 @@ class VoiceEmbeddingNode(Node):
         self.process_audio()
         self.process_resemblyzer()
 
-        self.sub_audio = self.create_subscription(AudioDataStamped, 'hotword_audio_stamped',
-                                                  self.handle_subscribe_audio_stamped, 10)
+        self.current_audio_info: Optional[AudioInfo] = None
+        self.sub_audio_stamped = self.create_subscription(AudioDataStamped, 'realtime_audio_stamped',
+                                                          self.handle_subscribe_audio_stamped, 10)
+        self.sub_audio_info = self.create_subscription(AudioInfo, 'realtime_audio_info',
+                                                       self.handle_subscribe_audio_info, 10)
+
         self.previous_emb = None
+
+    def handle_subscribe_audio_info(self, msg: AudioInfo) -> None:
+        """Store latest AudioInfo for subsequent AudioDataStamped."""
+        self.current_audio_info = msg
+        self.get_logger().info(f'Received AudioInfo: '
+                               f'ch={msg.channels}, '
+                               f'sr={msg.sample_rate}, '
+                               f'fmt={msg.sample_format}, '
+                               f'coding={msg.coding_format}')
 
     def handle_subscribe_audio_stamped(self, msg: AudioDataStamped) -> None:
         """
@@ -100,21 +114,38 @@ class VoiceEmbeddingNode(Node):
         - PCM16 mono or multi-channel audio
         - Embedding is extracted from the entire message payload
         """
-        t0: float = time.perf_counter()
+        if self.current_audio_info is None:
+            self.get_logger().warn('AudioDataStamped received but AudioInfo is not available yet')
+            return
+
+        info = self.current_audio_info
+        if info.sample_format != 'S16LE':
+            self.get_logger().error(f'Unsupported sample format: {info.sample_format}')
+            return
+
+        pcm = np.frombuffer(msg.audio.data, dtype=np.int16)
+        if pcm.size == 0:
+            self.get_logger().warn('Received empty audio buffer')
+            return
+
+        if info.channels > 1:
+            pcm = pcm.reshape(-1, info.channels).mean(axis=1)
+
+        waveform = pcm.astype(np.float32) / 32768.0
+        waveform_t = torch.from_numpy(waveform).unsqueeze(0)
+
+        sample_rate = info.sample_rate
+        if sample_rate != 16000:
+            waveform_t = torchaudio.transforms.Resample(sample_rate, 16000)(waveform_t)
+            sample_rate = 16000
+
+        t0 = time.perf_counter()
+
         pcm: np.ndarray = np.frombuffer(msg.audio.data, dtype=np.int16)
         if pcm.size == 0:
             self.get_logger().warn('Received empty audio buffer')
             return
 
-        waveform: np.ndarray = pcm.astype(np.float32) / 32768.0
-        num_channels: int = 1
-        if num_channels > 1:
-            waveform = waveform.reshape(-1, num_channels).mean(axis=1)
-        waveform_t: torch.Tensor = torch.from_numpy(waveform).unsqueeze(0)
-        sample_rate: int = 16000
-        if sample_rate != 16000:
-            waveform_t = torchaudio.transforms.Resample(sample_rate, 16000)(waveform_t)
-            sample_rate = 16000
         mel_transform = torchaudio.transforms.MelSpectrogram(
             sample_rate=sample_rate,
             n_fft=400,

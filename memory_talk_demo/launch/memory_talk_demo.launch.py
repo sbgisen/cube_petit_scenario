@@ -27,6 +27,7 @@ from launch.actions import OpaqueFunction
 from launch.launch_context import LaunchContext
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch.substitutions import LaunchConfiguration
+from launch_ros.actions import Node
 from launch_ros.actions import PushRosNamespace
 from launch_ros.substitutions import FindPackageShare
 import yaml
@@ -146,6 +147,11 @@ def launch_setup(context: LaunchContext) -> None:
         #         'color_fps': '10',
         #     }.items(),
         # ),
+        Node(package='memory_talk_demo', executable='user_store_node', name='user_store_node', output='screen'),
+        Node(package='memory_talk_demo', executable='memory_speaker_node', name='memory_speaker_node',
+             output='screen'),
+        Node(package='memory_talk_demo', executable='voice_embed', name='memory_talk_demo', output='screen'),
+        Node(package='memory_talk_demo', executable='memory_talk_demo', name='memory_talk_demo', output='screen'),
     ])
 
     return [bringup]

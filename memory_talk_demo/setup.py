@@ -45,6 +45,7 @@ setup(name=package_name,
               f'memory_talk_demo = {package_name}.memory_talk_demo_node:main',
               f'voice_embed = {package_name}.voice_embeddings:main',
               f'memory_speaker_node = {package_name}.memory_speaker_node:main',
+              f'user_store_node = {package_name}.user_store_node:main',
           ],
       })
 
