@@ -6,11 +6,23 @@ license = { text = "Apache-2.0" }
 maintainers = [
     { name = "SoftBank corp.", email = "SBGRP-git@g.softbank.co.jp" },
 ]
-dependencies = ["numpy<2"]
+dependencies = ["numpy<2", 
+                "torch==2.2.0",
+                "torchaudio==2.2.0",
+                "speechbrain==0.5.16",
+                "requests",
+                "huggingface_hub==0.19.4",
+                "packaging",
+                "resemblyzer",
+                "onnx==1.17.0",
+                "onnxruntime==1.20.1",
+                "ml_dtypes==0.4.0",
+                ]
 
 [project.scripts]
-memory_talk_demo = "memory_talk_demo.memory_talk_demo.memory_talk_demo_node:main"
-
+memory_talk_demo = "memory_talk_demo.memory_talk_demo_node:main"
+voice_embed = "memory_talk_demo.voice_embeddings:main"
+memory_speaker_node = "memory_talk_demo.memory_speaker_node:main"
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
