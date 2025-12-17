@@ -31,6 +31,8 @@ setup(
         ('share/' + package_name, ['package.xml']),
         (f'share/{package_name}/launch', glob.glob('./launch/*.launch.py')),
         (f'share/{package_name}/config', glob.glob('./config/*.txt')),
+        (f'share/{package_name}/config/color_settings', glob.glob('./config/color_settings/*.yaml')),
+
         # (f'share/{package_name}', ['pyproject.toml']),
     ],
     install_requires=['setuptools'],
