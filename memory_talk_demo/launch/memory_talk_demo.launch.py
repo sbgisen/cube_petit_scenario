@@ -150,7 +150,7 @@ def launch_setup(context: LaunchContext) -> None:
         Node(package='memory_talk_demo', executable='user_store_node', name='user_store_node', output='screen'),
         Node(package='memory_talk_demo', executable='memory_speaker_node', name='memory_speaker_node',
              output='screen'),
-        Node(package='memory_talk_demo', executable='voice_embed', name='memory_talk_demo', output='screen'),
+        Node(package='memory_talk_demo', executable='voice_embed', name='voice_embed', output='screen'),
         Node(package='memory_talk_demo', executable='memory_talk_demo', name='memory_talk_demo', output='screen'),
     ])
 

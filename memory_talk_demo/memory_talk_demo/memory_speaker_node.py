@@ -45,6 +45,7 @@ class SpeakerMemoryNode(Node):
         self.pub_confidence = self.create_publisher(Float32, 'speaker_confidence', 10)
 
         self.same_threshold: float = 0.75
+        self.last_embedding: Optional[np.ndarray] = None
 
         self.db = sqlite3.connect(
             '/home/gisen/ros/speaker_memory.db',
@@ -76,6 +77,24 @@ class SpeakerMemoryNode(Node):
         return response
 
     def handle_register_speaker(
+        self,
+        request: RegisterSpeaker.Request,
+        response: RegisterSpeaker.Response,
+    ) -> RegisterSpeaker.Response:
+        if self.last_embedding is None:
+            response.success = False
+            return response
+
+        speaker_id = self._next_speaker_id()
+        self._save_speaker(speaker_id, request.user_id, self.last_embedding)
+
+        self.last_user_id = request.user_id
+        self.last_is_new = False
+
+        response.success = True
+        return response
+
+    def handle_register_speaker2(
         self,
         request: RegisterSpeaker.Request,
         response: RegisterSpeaker.Response,
@@ -132,6 +151,7 @@ class SpeakerMemoryNode(Node):
     def on_embedding(self, msg: Float32MultiArray) -> None:
         emb = np.array(msg.data, dtype=np.float32)
         emb /= np.linalg.norm(emb)
+        self.last_embedding = emb
 
         # best_id: Optional[int] = None
         best_uid: Optional[str] = None
@@ -154,11 +174,6 @@ class SpeakerMemoryNode(Node):
             self.pub_confidence.publish(Float32(data=confidence))
             self.get_logger().info(f'Matched user={best_uid}, sim={best_sim:.3f}')
         else:
-            # self.pub_identity.publish(String(data='new'))
-            # self.pub_confidence.publish(Float32(data=0.0))
-            # new_user_id = f'anon_{time.time()}'
-            # self.register_user(new_user_id, emb)
-            # self.get_logger().info('New speaker detected')
             self.last_user_id = None
             self.last_confidence = 0.0
             self.last_is_new = True

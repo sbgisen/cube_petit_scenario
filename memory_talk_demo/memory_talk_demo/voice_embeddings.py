@@ -85,9 +85,9 @@ class VoiceEmbeddingNode(Node):
 
         self.sess: ort.InferenceSession = self._prepare_onnx()
 
-        self.process_onnx()
-        self.process_audio()
-        self.process_resemblyzer()
+        # self.process_onnx()
+        # self.process_audio()
+        # self.process_resemblyzer()
 
         self.current_audio_info: Optional[AudioInfo] = None
         self.sub_audio_stamped = self.create_subscription(AudioDataStamped, 'realtime_audio_stamped',
