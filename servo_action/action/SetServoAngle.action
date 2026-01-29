@@ -1,0 +1,11 @@
+int32 angle        # 0–180
+int32 time_sec     # 0 = immediate
+
+---
+# Result
+bool success
+int32 final_angle
+
+---
+# Feedback
+int32 current_angle
