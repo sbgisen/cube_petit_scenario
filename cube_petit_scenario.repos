@@ -1,0 +1,9 @@
+repositories:
+    audio_common:
+        type: git
+        url: https://github.com/ros-drivers/audio_common.git
+        version: ros2
+    respeaker_ros2:
+        type: git
+        url: https://github.com/sbgisen/respeaker_ros2.git
+        version: feature/jazzy-devel
