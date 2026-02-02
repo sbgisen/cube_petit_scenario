@@ -29,18 +29,40 @@ import serial
 
 from servo_action.action import SetServoAngle
 
+from serial.tools import list_ports
 
 class ServoActionServer(Node):
 
     def __init__(self) -> None:
         super().__init__('servo_action_server')
-        self.declare_parameter('serial_port', '/dev/ttyUSB0')
 
-        serial_port: str = (self.get_parameter('serial_port').get_parameter_value().string_value)
+        # ---------- Parameters ----------
+        self.declare_parameter('serial_port', '')
+        self.declare_parameter('usb_vid', '1a86')
+        self.declare_parameter('usb_pid', '7523')
 
-        self.get_logger().info(f'Using serial port: {serial_port}')
+        serial_port = self.get_parameter('serial_port').value
+        usb_vid = int(self.get_parameter('usb_vid').value, 16)
+        usb_pid = int(self.get_parameter('usb_pid').value, 16)
 
-        self._action_server: ActionServer = ActionServer(
+        # ---------- Resolve serial port ----------
+        if serial_port:
+            self.get_logger().info(f'Using serial port from parameter: {serial_port}')
+            port = serial_port
+        else:
+            self.get_logger().warn('serial_port not set, trying USB VID/PID search...')
+            port = self.find_serial_by_vid_pid(usb_vid, usb_pid)
+
+        if port is None:
+            self.get_logger().error(
+                f'Could not find serial device (VID={usb_vid:04x}, PID={usb_pid:04x})'
+            )
+            raise RuntimeError('Serial device not found')
+
+        self.get_logger().info(f'Using serial port: {port}')
+
+        # ---------- Action server ----------
+        self._action_server = ActionServer(
             self,
             SetServoAngle,
             'set_servo_angle',
@@ -49,7 +71,7 @@ class ServoActionServer(Node):
             cancel_callback=self.cancel_callback,
         )
 
-        self.ser: serial.Serial = serial.Serial(serial_port, 115200, timeout=0.1)
+        self.ser = serial.Serial(port, 115200, timeout=0.1)
         time.sleep(2)  # Arduino reset wait
 
         self._lock: threading.Lock = threading.Lock()
@@ -57,6 +79,20 @@ class ServoActionServer(Node):
 
         self._reader_thread: threading.Thread = threading.Thread(target=self.serial_reader, daemon=True)
         self._reader_thread.start()
+
+    def find_serial_by_vid_pid(self, vid: int, pid: int) -> Optional[str]:
+        """
+        Find serial device by USB VID/PID.
+        Returns device path like /dev/ttyUSB0 if found.
+        """
+        for port in list_ports.comports():
+            if port.vid == vid and port.pid == pid:
+                self.get_logger().info(
+                    f'Found USB device VID={vid:04x} PID={pid:04x} at {port.device}'
+                )
+                return port.device
+        return None
+
 
     # ---------- Serial reader ----------
     def serial_reader(self) -> None:

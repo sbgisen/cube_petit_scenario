@@ -1,0 +1,85 @@
+servo_autonomous:
+  ros__parameters:
+
+    # ================================
+    # Servo / Action settings
+    # ================================
+
+    # Action name of servo controller
+    servo_action_name: set_servo_angle
+
+    # Servo angle range
+    center_deg: 90.0
+    min_deg: 0.0
+    max_deg: 180.0
+    offset_yaw: -3.141592653589793
+    scale_yaw: 1.0
+    deadband_rad: 0.01
+    max_jump_deg: 90.0
+
+    # Time [sec] to reach target angle (slow, calm motion)
+    slow_time_sec: 3
+
+
+    # ================================
+    # Arousal model (0.0 ~ 1.0)
+    # ================================
+
+    # Initial arousal level at startup
+    initial_arousal: 0.3
+
+    # Natural decay of arousal per second
+    # Larger value -> calms down faster
+    arousal_decay_per_sec: 0.02
+
+    # Arousal increment when DOA message is received
+    arousal_from_doa: 0.005
+
+    # Arousal increment when people are detected
+    arousal_from_people: 0.05
+
+    # Extra arousal boost during EMERGENCY mode
+    # This makes the robot stay attentive for a while
+    # even after the wake word is detected
+    arousal_emergency: 0.3
+
+
+    # ================================
+    # Autonomous motion behavior
+    # ================================
+
+    # Interval [sec] of autonomous motion when arousal is LOW
+    # e.g. once per minute
+    low_arousal_interval_sec: 60.0
+
+    # Interval [sec] when arousal is MEDIUM
+    medium_arousal_interval_sec: 30.0
+
+    # Interval [sec] when arousal is HIGH
+    high_arousal_interval_sec: 5.0
+
+
+    # ================================
+    # Emergency (interrupt) behavior
+    # ================================
+
+    # Keyword to trigger emergency mode
+    emergency_keyword: "Cube-petit"
+
+    # Time [sec] to stay in emergency mode without new stimuli
+    emergency_timeout_sec: 5.0
+
+
+    # ================================
+    # Topic names (easy to extend)
+    # ================================
+
+    doa_topic: /doa
+    people_topic: /object_detection/laser/pair_of_legs_position
+    detect_word_topic: /detect_word
+    sst_topic: /julius_result_text
+
+    enable_doa: True
+    enable_people: True
+    enable_hotword: True
+    enable_sst: True
