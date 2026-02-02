@@ -87,10 +87,21 @@ class TalkFSM:
 
             outcome, cmd = result
             self.node.get_logger().info(f"{outcome}, {cmd}")
+
+            if cmd == 'come_to_me':
+                self.node.get_logger().info("TalkFSM: request ActionFSM (come_to_me)")
+                self.supervisor.set_action_active(True)
+                self._transition(TalkState.WAIT_FOR_HOTWORD)
+                return
+            if cmd == 'facing_me':
+                self.supervisor.set_action_active(True)
+                self._transition(TalkState.WAIT_FOR_HOTWORD)
+                return
+                
             if cmd:
                 self.create_response.set_input_cmd(cmd)
             #     self.gpt.set_input_cmd(cmd)
-
+            
             if outcome == 'response':
                 self._transition(TalkState.CREATE_RESPONSE)
             elif outcome == 'how_old_you_are':
@@ -99,6 +110,7 @@ class TalkFSM:
                 self._transition(TalkState.ROCK_PAPER_SCISSORS)
             elif outcome == 'gpt_conversation':
                 self._transition(TalkState.GPT_CONVERSATION)
+                
             else:
                 self._transition(TalkState.WAIT_FOR_HOTWORD)
 

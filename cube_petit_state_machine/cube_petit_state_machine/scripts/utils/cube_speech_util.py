@@ -18,7 +18,7 @@
 
 from rclpy.action import ActionClient
 from rclpy.node import Node
-from sbgisen_speech_msgs.action import Speech
+from cube_petit_speech_msgs.action import Speech
 
 
 class CubeSpeechUtil(Node):
@@ -39,7 +39,6 @@ class CubeSpeechUtil(Node):
         """Text to Jtalk."""
         talk_msg = Speech.Goal()
         talk_msg.text = phrase
-        talk_msg.method = "jtalk"
         talk_msg.emotion = "happiness"
         talk_msg.emotion_level = 2
         talk_msg.pitch = 130

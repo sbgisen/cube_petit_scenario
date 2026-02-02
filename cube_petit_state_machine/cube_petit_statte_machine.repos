@@ -2,4 +2,4 @@ repositories:
     cube_petit_ros:
         type: git
         uri: git@github.com:sbgisen/cube_petit_ros.git
-        version: humble-devel
+        version: feature/jazzy-devel

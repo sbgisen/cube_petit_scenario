@@ -157,6 +157,10 @@ class JuliusSearch:
             cube_speech.text_to_jtalk("わかりました")
             return ('hotword', None)
 
+        if text == "こっち向いて":
+            return ('action', 'facing_me')
+
+
         # ---------- fallback ----------
         self.node.get_logger().info("Julius: cannot understand")
         cube_speech.text_to_jtalk("よくわかりませんでした")

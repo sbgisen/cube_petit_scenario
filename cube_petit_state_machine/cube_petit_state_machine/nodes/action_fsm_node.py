@@ -30,6 +30,7 @@ from cube_petit_state_machine.nodes.supervisor_fsm import SupervisorFSM
 from cube_petit_state_machine.scripts.action_demo.states import (
     Idolng,
     RoundAndRound,
+    FacingMe,
 )
 
 # ===============================
@@ -39,6 +40,8 @@ from cube_petit_state_machine.scripts.action_demo.states import (
 class ActionState(Enum):
     IDLING = auto()
     ROUND_AND_ROUND = auto()
+    COME_TO_ME = auto()
+    FACING_ME = auto()
 
 
 # ===============================
@@ -53,6 +56,7 @@ class ActionFSM:
 
         self.idling = Idolng(node)
         self.round_and_round = RoundAndRound(node)
+        self.facing_me = FacingMe(node)
 
         self.node.get_logger().info("ActionFSM initialized")
 
@@ -72,13 +76,33 @@ class ActionFSM:
             result = self.idling.execute()
 
             if result == 'round_and_round':
+                self.supervisor.set_action_active(True)
                 self._transition(ActionState.ROUND_AND_ROUND)
-            # None の場合は IDLING 継続
+            elif result == 'come_to_me':
+                self.supervisor.set_action_active(True)
+                self._transition(ActionState.COME_TO_ME)
+            elif result == 'facing_me':
+                self.supervisor.set_action_active(True)
+                self._transition(ActionState.FACING_ME)
 
+            # None の場合は IDLING 継続
+        elif self.state == ActionState.COME_TO_ME:
+            result = self.come_to_me.execute()
+            if result == 'success':
+                self.supervisor.set_action_active(False)
+                self._transition(ActionState.IDLING)
+
+        elif self.state == ActionState.FACING_ME:
+            result = self.facing_me.execute()
+            if result == 'success':
+                self.supervisor.set_action_active(False)
+                self._transition(ActionState.IDLING)
+                
         elif self.state == ActionState.ROUND_AND_ROUND:
             result = self.round_and_round.execute()
 
             if result == 'success':
+                self.supervisor.set_action_active(False)
                 self._transition(ActionState.IDLING)
 
         # IDLE に戻ったら Action inactive

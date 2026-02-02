@@ -19,3 +19,8 @@
           - キューブプチ
         response:
           - はい
+      come_to_me:
+        julius:
+          - こっちきて
+          - 来て
+        action: come_to_me

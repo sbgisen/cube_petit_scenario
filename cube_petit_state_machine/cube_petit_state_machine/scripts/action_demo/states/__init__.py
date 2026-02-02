@@ -19,8 +19,10 @@
 
 from cube_petit_state_machine.scripts.action_demo.states.idling import Idolng
 from cube_petit_state_machine.scripts.action_demo.states.round_and_round import RoundAndRound
+from cube_petit_state_machine.scripts.action_demo.states.facing_me import FacingMe
 
 __all__ = [
     'Idolng',
     'RoundAndRound'
+    'FacingMe'
 ]

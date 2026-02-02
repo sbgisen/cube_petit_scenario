@@ -12,7 +12,7 @@
 
     # ===== Action / Motion =====
     cmd_vel_topic: /diff_drive_controller/cmd_vel
-
+    people_direction_topic: /doa
     # ===== Supervisor =====
     emergency_stop_topic: /emergency_stop
     supervisor_state_topic: /supervisor_state
