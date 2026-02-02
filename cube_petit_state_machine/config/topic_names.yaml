@@ -1,0 +1,22 @@
+/**:
+  ros__parameters:
+
+    # ===== Speech / Talk =====
+    detect_word_topic: /detect_word
+    julius_result_topic: /julius_result_text
+    voice_cmd_topic: /voice_cmd
+
+    # ===== Hand / Vision =====
+    hand_gesture_topic: /hand_gesture
+    hand_detected_image_topic: /hand_detected_image
+
+    # ===== Action / Motion =====
+    cmd_vel_topic: /diff_drive_controller/cmd_vel
+
+    # ===== Supervisor =====
+    emergency_stop_topic: /emergency_stop
+    supervisor_state_topic: /supervisor_state
+
+    # ===== Services =====
+    enable_realtime_conversation_service: /enable_realtime_conversation
+    get_realtime_conversation_status_service: /get_realtime_conversation_status

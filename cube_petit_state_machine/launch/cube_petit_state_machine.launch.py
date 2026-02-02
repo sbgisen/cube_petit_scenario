@@ -19,15 +19,45 @@
 
 from launch import LaunchDescription
 from launch_ros.actions import Node
+from launch_ros.substitutions import FindPackageShare
+from launch.substitutions import PathJoinSubstitution
 
 
-def generate_launch_description() -> None:
-    """Statemachine for cube_petit.
+def generate_launch_description() -> LaunchDescription:
+    """Launch Talk FSM + Action FSM."""
 
-    Returns:
-        _type_: _description_
-    """
+    topic_yaml = PathJoinSubstitution([
+        FindPackageShare('cube_petit_state_machine'),
+        'config',
+        'topic_names.yaml'
+    ])
+    conversation_yaml = PathJoinSubstitution([
+        FindPackageShare('cube_petit_state_machine'),
+        'config',
+        'conversations.yaml'
+    ])
+
+
+
+    talk_fsm_node = Node(
+        package='cube_petit_state_machine',
+        executable='talk_fsm_node',
+        name='talk_fsm_node',
+        parameters=[topic_yaml, conversation_yaml],
+        output='screen',
+        emulate_tty=True,
+    )
+
+    action_fsm_node = Node(
+        package='cube_petit_state_machine',
+        executable='action_fsm_node',
+        name='action_fsm_node',
+        parameters=[topic_yaml],
+        output='screen',
+        emulate_tty=True,
+    )
+
     return LaunchDescription([
-        Node(package='cube_petit_state_machine', executable='move_sm.py', output='screen'),
-        Node(package='cube_petit_state_machine', executable='talk_sm.py', output='screen'),
+        talk_fsm_node,
+        action_fsm_node,
     ])

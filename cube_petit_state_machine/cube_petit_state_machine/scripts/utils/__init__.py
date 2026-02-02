@@ -1,6 +1,7 @@
 #!/usr/bin/env python
+# -*- coding:utf-8 -*-
 
-# Copyright (c) 2025 SoftBank Corp.
+# Copyright (c) 2024 SoftBank Corp.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,3 +15,10 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 #
+"""Specify importable states."""
+
+from cube_petit_state_machine.scripts.utils.cube_speech_util import CubeSpeechUtil
+
+__all__ = [
+    'CubeSpeechUtil'
+]

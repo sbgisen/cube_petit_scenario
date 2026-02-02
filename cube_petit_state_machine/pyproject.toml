@@ -1,0 +1,27 @@
+[project]
+name = "cube_petit_state_machine"
+version = "0.1.0"
+description = "Add your description here"
+license = { text = "Apache-2.0" }
+maintainers = [
+    { name = "SoftBank corp.", email = "SBGRP-git@g.softbank.co.jp" },
+]
+dependencies = [
+    "numpy<2",
+    "openai>=2.16.0",
+    "pyyaml>=6.0.3",
+]
+
+[project.scripts]
+talk_fsm_node = "cube_petit_state_machine.nodes.talk_fsm_node:main"
+action_fsm_node = "cube_petit_state_machine.nodes.action_fsm_node:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.metadata]
+allow-direct-references = true
+
+[tool.hatch.build.targets.wheel]
+packages = ["cube_petit_state_machine"]

@@ -43,10 +43,10 @@ setup(
     tests_require=['pytest'],
     entry_points={
         'console_scripts': [
-            'move_sm = cube_petit_state_machine.nodes.move_sm:main',
-            'talk_sm = cube_petit_state_machine.nodes.talk_sm:main',
+            'talk_fsm_node = cube_petit_state_machine.nodes.talk_fsm_node:main',
+            'action_fsm_node = cube_petit_state_machine.nodes.action_fsm_node:main',
         ],
-    },
+    }
 )
 
 subprocess.Popen([f'{package_name}/fix_shebang.py'],

@@ -1,0 +1,21 @@
+/talk_fsm_node:
+  ros__parameters:
+
+    conversations:
+      hello:
+        julius:
+          - こんにちは
+          - こんちは
+        response:
+          - こんにちは！
+      introduce:
+        julius:
+          - 自己紹介して
+          - 君の名前は
+        response:
+          - 僕の名前はキューブプチです！
+      cube_petit:
+        julius:
+          - キューブプチ
+        response:
+          - はい
