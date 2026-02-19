@@ -1,0 +1,10 @@
+internal_state_node:
+  ros__parameters:
+    curiosity_init: 60.0
+    boredom_init: 40.0
+    energy_init: 80.0
+
+behavior_node:
+  ros__parameters:
+    speak_probability: 0.2
+    boredom_threshold: 80.0
