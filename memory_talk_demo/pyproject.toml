@@ -17,6 +17,8 @@ dependencies = ["numpy<2",
                 "onnx==1.17.0",
                 "onnxruntime==1.20.1",
                 "ml_dtypes==0.4.0",
+                "setuptools"
+
                 ]
 
 [project.scripts]

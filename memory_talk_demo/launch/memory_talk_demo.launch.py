@@ -113,16 +113,16 @@ def launch_setup(context: LaunchContext) -> None:
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(FindPackageShare('sbgisen_speech').find('sbgisen_speech'), 'sbgisen_speech.launch.py')),),
-        # IncludeLaunchDescription(PythonLaunchDescriptionSource(
-        #     os.path.join(
-        #         FindPackageShare('cube_petit_facial_animation').find('cube_petit_facial_animation'), 'launch',
-        #         'cube_petit_facial_animation.launch.py')),
-        #                          launch_arguments={'color': LaunchConfiguration('color')}.items()),
-        # IncludeLaunchDescription(
-        #     PythonLaunchDescriptionSource(
-        #         os.path.join(
-        #             FindPackageShare('cube_petit_bringup').find('cube_petit_bringup'), 'launch',
-        #             'teleop.launch.py')),),
+        IncludeLaunchDescription(PythonLaunchDescriptionSource(
+            os.path.join(
+                FindPackageShare('cube_petit_facial_animation').find('cube_petit_facial_animation'), 'launch',
+                'cube_petit_facial_animation.launch.py')),
+                                 launch_arguments={'color': LaunchConfiguration('color')}.items()),
+        IncludeLaunchDescription(
+            PythonLaunchDescriptionSource(
+                os.path.join(
+                    FindPackageShare('cube_petit_bringup').find('cube_petit_bringup'), 'launch',
+                    'teleop.launch.py')),),
         IncludeLaunchDescription(
             PythonLaunchDescriptionSource(
                 os.path.join(

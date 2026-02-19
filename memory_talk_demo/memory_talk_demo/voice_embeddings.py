@@ -192,7 +192,7 @@ class VoiceEmbeddingNode(Node):
                 x = x.transpose(1, 2)
                 return self.model(x)
 
-        onnx_path: str = ('/home/gisen/ros/src/cube_petit_scenario/'
+        onnx_path: str = ('/home/cube-petit/ros/src/cube_petit_scenario/'
                           'memory_talk_demo/resource/ecapa_voxceleb.onnx')
 
         if not os.path.exists(onnx_path):

@@ -59,7 +59,7 @@ class UserStore:
         if self.get_user(user_id) is not None:
             return self.get_user(user_id)
 
-        cur = self.db.cursor()
+        cur = self.cursor()
         cur.execute(
             """
             INSERT INTO users (user_id, interaction_count, confidence, display_name)

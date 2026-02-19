@@ -48,7 +48,7 @@ class SpeakerMemoryNode(Node):
         self.last_embedding: Optional[np.ndarray] = None
 
         self.db = sqlite3.connect(
-            '/home/gisen/ros/speaker_memory.db',
+            '/home/cube-petit/ros/speaker_memory.db',
             check_same_thread=False,
         )
         self._init_db()
