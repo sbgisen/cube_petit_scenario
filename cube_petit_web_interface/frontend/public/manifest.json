@@ -1,0 +1,9 @@
+{
+  "name": "オレンジプチ",
+  "short_name": "プチ",
+  "display": "fullscreen",
+  "background_color": "#0d0d1a",
+  "theme_color": "#0d0d1a",
+  "start_url": "/",
+  "icons": []
+}
