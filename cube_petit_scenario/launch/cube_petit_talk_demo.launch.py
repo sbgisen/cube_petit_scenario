@@ -99,4 +99,4 @@ def generate_launch_description() -> LaunchDescription:
         output='screen',
     )
 
-    return LaunchDescription(args + [realtime_chat, leg_detector, respeaker, display, display_movies])
+    return LaunchDescription(args + [realtime_chat, leg_detector, respeaker])

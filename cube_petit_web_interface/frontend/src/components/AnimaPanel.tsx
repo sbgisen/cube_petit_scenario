@@ -1,4 +1,3 @@
-import { useMemo } from 'react';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
 
@@ -11,10 +10,6 @@ interface InternalState {
   human_detected: boolean;
   petit_detected: boolean;
   sleep_mode: boolean;
-}
-
-interface RosString {
-  data: string;
 }
 
 interface Props {
@@ -32,16 +27,16 @@ const GAUGES: { key: keyof InternalState; label: string; color: string; emoji: s
 function Gauge({ value, color, label, emoji }: { value: number; color: string; label: string; emoji: string }) {
   const pct = Math.min(100, Math.max(0, value));
   return (
-    <div style={{ marginBottom: 6 }}>
-      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 3 }}>
-        <span style={{ color: 'var(--t-text-dim)', fontSize: 11 }}>{emoji} {label}</span>
-        <span style={{ color, fontSize: 11, fontWeight: 'bold' }}>{pct.toFixed(1)}</span>
+    <div style={{ marginBottom: 3 }}>
+      <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 2 }}>
+        <span style={{ color: 'var(--t-text)', fontSize: 10 }}>{emoji} {label}</span>
+        <span style={{ color, fontSize: 10, fontWeight: 'bold' }}>{pct.toFixed(1)}</span>
       </div>
-      <div style={{ background: '#222', borderRadius: 4, height: 8, overflow: 'hidden' }}>
+      <div style={{ background: '#222', borderRadius: 3, height: 5, overflow: 'hidden' }}>
         <div style={{
           width: `${pct}%`, height: '100%', background: color,
-          borderRadius: 4, transition: 'width 0.4s ease',
-          boxShadow: `0 0 6px ${color}88`,
+          borderRadius: 3, transition: 'width 0.4s ease',
+          boxShadow: `0 0 4px ${color}88`,
         }} />
       </div>
     </div>
@@ -51,7 +46,7 @@ function Gauge({ value, color, label, emoji }: { value: number; color: string; l
 function Flag({ active, label, activeColor = '#00cc66' }: { active: boolean; label: string; activeColor?: string }) {
   return (
     <div style={{
-      padding: '3px 8px', borderRadius: 10, fontSize: 11,
+      padding: '2px 6px', borderRadius: 10, fontSize: 10,
       background: active ? `${activeColor}33` : '#222',
       color: active ? activeColor : '#555',
       border: `1px solid ${active ? activeColor : 'var(--t-border)'}`,
@@ -62,37 +57,31 @@ function Flag({ active, label, activeColor = '#00cc66' }: { active: boolean; lab
 }
 
 export function AnimaPanel({ ros, namespace }: Props) {
-  const raw = useRosTopic<RosString>(
+  const state = useRosTopic<InternalState>(
     ros,
-    `/${namespace}/internal_state_json`,
-    'std_msgs/String',
+    `/${namespace}/internal_state`,
+    'cube_petit_scenario_msgs/InternalState',
     true,
   );
 
-  const state = useMemo<InternalState | null>(() => {
-    if (!raw) return null;
-    try { return JSON.parse(raw.data) as InternalState; }
-    catch { return null; }
-  }, [raw]);
-
   return (
     <div style={{
-      background: '#16162a', borderRadius: 8, padding: '10px 12px',
+      background: '#16162a', borderRadius: 8, padding: '6px 10px',
       border: '1px solid var(--t-surface2)', flexShrink: 0,
     }}>
-      <div style={{ color: '#666', fontSize: 11, marginBottom: 8, letterSpacing: 1 }}>ANIMA</div>
+      <div style={{ color: '#666', fontSize: 10, marginBottom: 5, letterSpacing: 1 }}>ANIMA</div>
 
       {state ? (
         <>
           {GAUGES.map(({ key, label, color, emoji }) => (
             <Gauge key={key} value={state[key] as number} color={color} label={label} emoji={emoji} />
           ))}
-          <div style={{ display: 'flex', gap: 6, marginTop: 8, flexWrap: 'wrap' }}>
+          <div style={{ display: 'flex', gap: 4, marginTop: 5, flexWrap: 'wrap' }}>
             <Flag active={state.human_detected} label="人検出" activeColor="#ff6644" />
             <Flag active={state.petit_detected} label="プチ検出" activeColor="#44aaff" />
             <Flag active={state.sleep_mode}     label="スリープ" activeColor="#9966ff" />
           </div>
-          <div style={{ color: 'var(--t-border2)', fontSize: 10, marginTop: 6 }}>
+          <div style={{ color: 'var(--t-border2)', fontSize: 10, marginTop: 4 }}>
             gen.{state.body_generation}
           </div>
         </>

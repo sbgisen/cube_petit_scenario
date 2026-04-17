@@ -10,6 +10,8 @@ const btnBase: React.CSSProperties = {
   color: 'var(--t-text)', fontSize: 13, lineHeight: 1.3, textAlign: 'center',
 };
 
+const MAX = 8;
+
 export function QuickPhraseGrid({ phrases, onSpeak, onAdd, speechAvailable }: Props) {
   const handleAdd = () => {
     const text = window.prompt('フレーズを入力してください');
@@ -39,12 +41,14 @@ export function QuickPhraseGrid({ phrases, onSpeak, onAdd, speechAvailable }: Pr
           {phrase}
         </button>
       ))}
-      <button
-        onClick={handleAdd}
-        style={{ ...btnBase, background: 'var(--t-surface)', border: '1px dashed var(--t-border2)', color: 'var(--t-text-dim)', fontSize: 20 }}
-      >
-        ＋
-      </button>
+      {phrases.length < MAX && (
+        <button
+          onClick={handleAdd}
+          style={{ ...btnBase, background: 'var(--t-surface)', border: '1px dashed var(--t-border2)', color: 'var(--t-text-dim)', fontSize: 20 }}
+        >
+          ＋
+        </button>
+      )}
     </div>
   );
 }

@@ -3,6 +3,8 @@ import { useRosConnection } from './hooks/useRosConnection';
 import { OperationTab } from './components/OperationTab';
 import { TalkTab } from './components/TalkTab';
 import { SystemPanel } from './components/SystemPanel';
+import { CustomTab } from './components/CustomTab';
+import { MapTab } from './components/MapTab';
 import type { RobotConfig } from './types/ros';
 
 const HOST = window.location.hostname;
@@ -70,12 +72,14 @@ function loadQuickPhrases(): string[] {
   return [...DEFAULT_QUICK_PHRASES];
 }
 
-type Tab = 'operation' | 'talk' | 'system';
+type Tab = 'operation' | 'talk' | 'map' | 'system' | 'custom';
 
 const TABS: { id: Tab; label: string }[] = [
   { id: 'operation', label: '操作' },
   { id: 'talk',      label: '会話' },
+  { id: 'map',       label: 'マップ' },
   { id: 'system',    label: 'システム' },
+  { id: 'custom',    label: 'カスタム' },
 ];
 
 export default function App() {
@@ -164,8 +168,10 @@ export default function App() {
       {/* コンテンツ */}
       <div style={{ flex: 1, padding: 12, overflow: 'hidden', minHeight: 0 }}>
         {tab === 'operation' && <OperationTab ros={ros} namespace={selectedRobot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
-        {tab === 'talk'      && <TalkTab      ros={ros} namespace={selectedRobot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+        {tab === 'talk'      && <TalkTab      ros={ros} namespace={selectedRobot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} apiUrl={API_URL} />}
         {tab === 'system'    && <SystemPanel  ros={ros} namespace={selectedRobot.namespace} apiUrl={API_URL} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+        {tab === 'map'       && <MapTab        namespace={selectedRobot.namespace} apiUrl={API_URL} />}
+        {tab === 'custom'    && <CustomTab    apiUrl={API_URL} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
       </div>
     </div>
   );
