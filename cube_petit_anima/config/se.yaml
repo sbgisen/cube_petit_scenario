@@ -1,2 +1,2 @@
-se_parent_dir: ~/.openclaw/workspace/
-mapping_file_path: ~/.openclaw/workspace/docs/mixkit_state_mapping.json
+se_parent_dir: ~/ros/src/cube_petit_scenario/cube_petit_anima/resource/
+mapping_file_path: ~/ros/src/cube_petit_scenario/cube_petit_anima/resource/mixkit_state_mapping.json

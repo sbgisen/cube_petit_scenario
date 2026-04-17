@@ -69,7 +69,7 @@ class BehaviorNode(Node):
             self.swing_active = False
 
         elif state.boredom > 80:
-            self.swing_active = True
+            self.swing_active = False
             if (now - self.last_se_time) > self.se_cooldown:
                 self.get_logger().info("play SE: 喜び")
                 self.se.play("感情：興味")

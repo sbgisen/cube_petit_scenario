@@ -1,0 +1,434 @@
+[
+  {
+    "state": "起動",
+    "path": "assets/mixkit/mixkit-soft-quick-punch-2151.wav",
+    "volume": 100,
+    "seconds": 0.48,
+    "alert": 10,
+    "notes": "短くて前向きなブート提示"
+  },
+  {
+    "state": "シャットダウン",
+    "path": "assets/mixkit/mixkit-relaxing-bell-chime-3109.wav",
+    "volume": 50,
+    "seconds": 1.68,
+    "alert": 5,
+    "notes": "柔らかな終息ベル"
+  },
+  {
+    "state": "スリープ移行",
+    "path": "assets/mixkit/mixkit-retro-confirmation-tone-2860.wav",
+    "volume": 99,
+    "seconds": 1.84,
+    "alert": 9,
+    "notes": "ピロロンでスリープ合図"
+  },
+  {
+    "state": "スリープ解除",
+    "path": "assets/mixkit/mixkit-happy-bell-alert-601.wav",
+    "volume": 100,
+    "seconds": 2.0,
+    "alert": 2,
+    "notes": "穏やかな起床ベル"
+  },
+  {
+    "state": "待機中",
+    "path": "assets/mixkit/mixkit-sci-fi-loading-operative-system-2529.wav",
+    "volume": 50,
+    "seconds": 2.63,
+    "alert": 1,
+    "notes": "低めの待機ループ"
+  },
+  {
+    "state": "ユーザー接近検知",
+    "path": "assets/mixkit/mixkit-toy-drums-and-bell-ding-560.wav",
+    "volume": 50,
+    "seconds": 1.45,
+    "alert": 7,
+    "notes": "明るい呼び込みベル"
+  },
+  {
+    "state": "ユーザー離脱検知",
+    "path": "assets/mixkit/mixkit-long-pop-2358.wav",
+    "volume": 53,
+    "seconds": 0.48,
+    "alert": 8,
+    "notes": "控えめなお別れポップ"
+  },
+  {
+    "state": "視線検知",
+    "path": "assets/mixkit/mixkit-water-sci-fi-bleep-902.wav",
+    "volume": 76,
+    "seconds": 0.92,
+    "alert": 10,
+    "notes": "方向検知ぽいピピッ音"
+  },
+  {
+    "state": "タッチ検知",
+    "path": "assets/mixkit/mixkit-bubble-pop-up-alert-notification-2357.wav",
+    "volume": 91,
+    "seconds": 0.38,
+    "alert": 6,
+    "notes": "軽いポコッと反応"
+  },
+  {
+    "state": "聞き取り開始",
+    "path": "assets/mixkit/mixkit-positive-interface-beep-221.wav",
+    "volume": 100,
+    "seconds": 0.56,
+    "alert": 9,
+    "notes": "聞き取り開始のピッ"
+  },
+  {
+    "state": "聞き取り終了",
+    "path": "assets/mixkit/mixkit-retro-confirmation-tone-2860.wav",
+    "volume": 99,
+    "seconds": 1.84,
+    "alert": 9,
+    "notes": "終了を知らせる下降音"
+  },
+  {
+    "state": "音声未検出",
+    "path": "assets/mixkit/mixkit-dry-pop-up-notification-alert-2356.wav",
+    "volume": 69,
+    "seconds": 0.3,
+    "alert": 6,
+    "notes": "未検出リマインダ"
+  },
+  {
+    "state": "音声途切れ",
+    "path": "assets/mixkit/mixkit-negative-tone-interface-tap-2569.wav",
+    "volume": 53,
+    "seconds": 1.25,
+    "alert": 7,
+    "notes": "途切れ警告ピッ"
+  },
+  {
+    "state": "処理開始",
+    "path": "assets/mixkit/mixkit-tech-click-1140.wav",
+    "volume": 76,
+    "seconds": 0.42,
+    "alert": 6,
+    "notes": "処理トリガのクリック"
+  },
+  {
+    "state": "処理中",
+    "path": "assets/mixkit/mixkit-high-tech-robot-movement-2526.wav",
+    "volume": 53,
+    "seconds": 3.53,
+    "alert": 4,
+    "notes": "処理進行の低い機械音"
+  },
+  {
+    "state": "処理完了",
+    "path": "assets/mixkit/mixkit-quick-win-video-game-notification-269.wav",
+    "volume": 84,
+    "seconds": 1.95,
+    "alert": 10,
+    "notes": "完了ウィン通知"
+  },
+  {
+    "state": "処理タイムアウト",
+    "path": "assets/mixkit/mixkit-fast-wall-clock-ticking-1063.wav",
+    "volume": 69,
+    "seconds": 2.48,
+    "alert": 8,
+    "notes": "タイムアウトの刻み音"
+  },
+  {
+    "state": "理解成功",
+    "path": "assets/mixkit/mixkit-confirmation-tone-2867.wav",
+    "volume": 84,
+    "seconds": 1.3,
+    "alert": 9,
+    "notes": "理解OKの肯定音"
+  },
+  {
+    "state": "部分理解",
+    "path": "assets/mixkit/mixkit-retro-arcade-casino-notification-211.wav",
+    "volume": 50,
+    "seconds": 4.25,
+    "alert": 5,
+    "notes": "部分理解の穏やかピロリ"
+  },
+  {
+    "state": "誤認識",
+    "path": "assets/mixkit/mixkit-click-error-1110.wav",
+    "volume": 61,
+    "seconds": 1.11,
+    "alert": 6,
+    "notes": "誤認識エラークリック"
+  },
+  {
+    "state": "困惑",
+    "path": "assets/mixkit/mixkit-cartoon-character-sneeze-2209.wav",
+    "volume": 76,
+    "seconds": 1.11,
+    "alert": 9,
+    "notes": "コミカル困惑音"
+  },
+  {
+    "state": "肯定",
+    "path": "assets/mixkit/mixkit-correct-answer-tone-2870.wav",
+    "volume": 69,
+    "seconds": 1.96,
+    "alert": 8,
+    "notes": "了解ジングル"
+  },
+  {
+    "state": "否定",
+    "path": "assets/mixkit/mixkit-wrong-answer-bass-buzzer-948.wav",
+    "volume": 100,
+    "seconds": 2.55,
+    "alert": 10,
+    "notes": "低めの否定ブザー"
+  },
+  {
+    "state": "再確認要求",
+    "path": "assets/mixkit/mixkit-bubble-pop-up-alert-notification-2357.wav",
+    "volume": 91,
+    "seconds": 0.38,
+    "alert": 6,
+    "notes": "2回鳴らしで確認促し"
+  },
+  {
+    "state": "聞き返し",
+    "path": "assets/mixkit/mixkit-unknown-technology-chirp-pattern-3125.wav",
+    "volume": 53,
+    "seconds": 3.62,
+    "alert": 7,
+    "notes": "聞き直しの上昇チープ"
+  },
+  {
+    "state": "提案",
+    "path": "assets/mixkit/mixkit-magic-marimba-2820.wav",
+    "volume": 69,
+    "seconds": 3.34,
+    "alert": 5,
+    "notes": "提案ぽい柔らかマリンバ"
+  },
+  {
+    "state": "注意喚起",
+    "path": "assets/mixkit/mixkit-fast-small-sweep-transition-166.wav",
+    "volume": 100,
+    "seconds": 0.78,
+    "alert": 10,
+    "notes": "素早い注意スウィープ"
+  },
+  {
+    "state": "警告",
+    "path": "assets/mixkit/mixkit-game-quick-warning-notification-268.wav",
+    "volume": 50,
+    "seconds": 4.5,
+    "alert": 8,
+    "notes": "ゲーム系の警告音"
+  },
+  {
+    "state": "重大エラー",
+    "path": "assets/mixkit/mixkit-tech-break-fail-2947.wav",
+    "volume": 69,
+    "seconds": 1.06,
+    "alert": 6,
+    "notes": "明確なエラーブレイク"
+  },
+  {
+    "state": "成功",
+    "path": "assets/mixkit/mixkit-arcade-game-jump-coin-216.wav",
+    "volume": 100,
+    "seconds": 0.12,
+    "alert": 7,
+    "notes": "軽快な成功チャイム"
+  },
+  {
+    "state": "失敗",
+    "path": "assets/mixkit/mixkit-falling-game-over-1942.wav",
+    "volume": 100,
+    "seconds": 2.21,
+    "alert": 9,
+    "notes": "しょぼん系の下降音"
+  },
+  {
+    "state": "キャンセル受理",
+    "path": "assets/mixkit/mixkit-select-click-1109.wav",
+    "volume": 61,
+    "seconds": 1.1,
+    "alert": 6,
+    "notes": "受付クリック音"
+  },
+  {
+    "state": "キャンセル完了",
+    "path": "assets/mixkit/mixkit-bubble-pop-up-alert-notification-2357.wav",
+    "volume": 91,
+    "seconds": 0.38,
+    "alert": 6,
+    "notes": "完了ピコ音"
+  },
+  {
+    "state": "記憶保存",
+    "path": "assets/mixkit/mixkit-software-interface-start-2574.wav",
+    "volume": 61,
+    "seconds": 2.35,
+    "alert": 9,
+    "notes": "保存開始のソフトウェアSE"
+  },
+  {
+    "state": "記憶呼び出し",
+    "path": "assets/mixkit/mixkit-camera-shutter-hard-click-1430.wav",
+    "volume": 50,
+    "seconds": 0.63,
+    "alert": 9,
+    "notes": "瞬間呼び出しのカシャ"
+  },
+  {
+    "state": "記憶失敗",
+    "path": "assets/mixkit/mixkit-cartoon-failure-piano-473.wav",
+    "volume": 100,
+    "seconds": 2.31,
+    "alert": 9,
+    "notes": "失敗ピアノ"
+  },
+  {
+    "state": "ネットワーク接続中",
+    "path": "assets/mixkit/mixkit-technology-alert-transition-3121.wav",
+    "volume": 50,
+    "seconds": 5.0,
+    "alert": 5,
+    "notes": "接続中のシンセ推移"
+  },
+  {
+    "state": "接続成功",
+    "path": "assets/mixkit/mixkit-high-tech-bleep-confirmation-2520.wav",
+    "volume": 100,
+    "seconds": 0.61,
+    "alert": 4,
+    "notes": "接続成功ピコン"
+  },
+  {
+    "state": "接続失敗",
+    "path": "assets/mixkit/mixkit-robotic-engine-malfunction-3149.wav",
+    "volume": 50,
+    "seconds": 2.5,
+    "alert": 5,
+    "notes": "故障ぽいエラー"
+  },
+  {
+    "state": "再接続試行",
+    "path": "assets/mixkit/mixkit-fast-sci-fi-bleep-903.wav",
+    "volume": 100,
+    "seconds": 1.36,
+    "alert": 9,
+    "notes": "速い再接続トーン"
+  },
+  {
+    "state": "バッテリー低下",
+    "path": "assets/mixkit/mixkit-losing-bleeps-2026.wav",
+    "volume": 69,
+    "seconds": 1.99,
+    "alert": 9,
+    "notes": "バッテリ低下の下降音"
+  },
+  {
+    "state": "充電開始",
+    "path": "assets/mixkit/mixkit-high-tech-notification-bleep-2519.wav",
+    "volume": 100,
+    "seconds": 0.55,
+    "alert": 7,
+    "notes": "充電開始ピッ"
+  },
+  {
+    "state": "充電完了",
+    "path": "assets/mixkit/mixkit-confirmation-tone-2867 (1).wav",
+    "volume": 84,
+    "seconds": 1.3,
+    "alert": 9,
+    "notes": "完了のもう一段明るいバリエ"
+  },
+  {
+    "state": "感情：喜び",
+    "path": "assets/mixkit/mixkit-cartoon-giggles-417.wav",
+    "volume": 100,
+    "seconds": 1.52,
+    "alert": 9,
+    "notes": "楽しげな笑い"
+  },
+  {
+    "state": "感情：安心",
+    "path": "assets/mixkit/mixkit-uplifting-bells-notification-938.wav",
+    "volume": 84,
+    "seconds": 2.93,
+    "alert": 7,
+    "notes": "落ち着くベル"
+  },
+  {
+    "state": "感情：興味",
+    "path": "assets/mixkit/mixkit-high-tech-bleep-2521.wav",
+    "volume": 80,
+    "seconds": 0.69,
+    "alert": 5,
+    "notes": "好奇心ぽい短い電子音"
+  },
+  {
+    "state": "感情：驚き",
+    "path": "assets/mixkit/mixkit-game-show-buzz-in-3090.wav",
+    "volume": 61,
+    "seconds": 1.97,
+    "alert": 8,
+    "notes": "驚きのブザー"
+  },
+  {
+    "state": "感情：困惑",
+    "path": "assets/mixkit/mixkit-cartoon-character-sneeze-2209.wav",
+    "volume": 76,
+    "seconds": 1.11,
+    "alert": 9,
+    "notes": "コミカル困惑音"
+  },
+  {
+    "state": "感情：悲しみ",
+    "path": "assets/mixkit/mixkit-cartoon-little-cat-meow-91.wav",
+    "volume": 76,
+    "seconds": 1.35,
+    "alert": 5,
+    "notes": "しょんぼり猫声"
+  },
+  {
+    "state": "感情：疲労",
+    "path": "assets/mixkit/mixkit-futuristic-glitch-robot-1039.wav",
+    "volume": 50,
+    "seconds": 4.5,
+    "alert": 6,
+    "notes": "ゆっくり疲労感の電子音"
+  },
+  {
+    "state": "アイドル時自己主張",
+    "path": "assets/mixkit/mixkit-spaceship-drone-moves-2748.wav",
+    "volume": 69,
+    "seconds": 2.15,
+    "alert": 3,
+    "notes": "ごく小音のドローン"
+  },
+  {
+    "state": "長時間無反応",
+    "path": "assets/mixkit/mixkit-soft-quick-punch-2151.wav",
+    "volume": 100,
+    "seconds": 0.48,
+    "alert": 10,
+    "notes": "小さなピッで存在感"
+  },
+  {
+    "state": "ユーザー集中検知",
+    "path": "assets/mixkit/mixkit-sci-fi-positive-notification-266.wav",
+    "volume": 50,
+    "seconds": 4.0,
+    "alert": 7,
+    "notes": "集中を邪魔しない上昇音"
+  },
+  {
+    "state": "ユーザー離席検知",
+    "path": "assets/mixkit/mixkit-long-pop-2358.wav",
+    "volume": 53,
+    "seconds": 0.48,
+    "alert": 8,
+    "notes": "離席を知らせる軽音"
+  }
+]

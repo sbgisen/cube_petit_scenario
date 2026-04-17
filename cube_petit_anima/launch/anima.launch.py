@@ -41,7 +41,7 @@ def generate_launch_description():
 
         use_sim_time_arg,
 
-        PushRosNamespace('cube_petit_pink'),
+        PushRosNamespace('cube_petit_orange'),
 
         Node(
             package=package_name,
