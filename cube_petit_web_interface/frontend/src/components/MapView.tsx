@@ -127,6 +127,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
   const doa = useRosTopic<PoseStamped>(ros, `/${namespace}/doa`, 'geometry_msgs/PoseStamped', layers.doa);
   const odom = useRosTopic<Odometry>(ros, `/${namespace}/odom`, 'nav_msgs/Odometry', frame === 'odom' || layers.costmap);
   const mapTf = useRosTf(ros, 'map', `${namespace}/base_link`, frame === 'map' || layers.map || layers.plan);
+  const mapOdomTf = useRosTf(ros, 'map', `${namespace}/odom`, frame === 'map' && layers.costmap);
   const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map);
   const costmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/global_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
   const localCostmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/local_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
@@ -335,19 +336,34 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       ctx.restore();
     }
 
-    // ローカルコストマップ描画 (odomフレーム基準)
+    // ローカルコストマップ描画 (odomフレーム基準, mapフレームでは TF 回転考慮)
     if (localCostmapImageRef.current && localCostmapGrid && layers.costmap) {
       const cmImg = localCostmapImageRef.current;
-      const { resolution: res, width: mw, height: mh, origin } = localCostmapGrid.info;
+      const { resolution: res, height: mh, origin } = localCostmapGrid.info;
       const ox = origin.position.x;
       const oy = origin.position.y;
-      const local_ref_rx = inMapFrame ? (robot_odom_x - robot_map_x) : inOdomFrame ? 0 : robot_odom_x;
-      const local_ref_ry = inMapFrame ? (robot_odom_y - robot_map_y) : inOdomFrame ? 0 : robot_odom_y;
       const pxPerM = res * s;
-      const mapX0 = -(oy + (mh - 1) * res - local_ref_ry) * s;
-      const mapY0 = -(ox - local_ref_rx) * s;
+      const oyTop = oy + (mh - 1) * res;
       ctx.save();
-      ctx.transform(0, -pxPerM, pxPerM, 0, mapX0, mapY0);
+      if (inMapFrame && mapOdomTf) {
+        const yaw = 2 * Math.atan2(mapOdomTf.rotation.z, mapOdomTf.rotation.w);
+        const tx = mapOdomTf.translation.x;
+        const ty = mapOdomTf.translation.y;
+        const cosY = Math.cos(yaw);
+        const sinY = Math.sin(yaw);
+        ctx.transform(
+          -sinY * pxPerM,
+          -cosY * pxPerM,
+           cosY * pxPerM,
+          -sinY * pxPerM,
+          -(sinY * ox + cosY * oyTop + ty) * s,
+          -(cosY * ox - sinY * oyTop + tx) * s,
+        );
+      } else {
+        const local_ref_rx = inOdomFrame ? 0 : robot_odom_x;
+        const local_ref_ry = inOdomFrame ? 0 : robot_odom_y;
+        ctx.transform(0, -pxPerM, pxPerM, 0, -(oyTop - local_ref_ry) * s, -(ox - local_ref_rx) * s);
+      }
       ctx.drawImage(cmImg, 0, 0);
       ctx.restore();
     }
@@ -364,7 +380,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     if (scan && layers.lidar) {
       ctx.fillStyle = '#00ff88';
       scan.ranges.forEach((r, i) => {
-        if (r === 0 || r > scan.range_max) return;
+        if (r < 0.15 || r > 12) return;
         const scanAngle = scan.angle_min + i * scan.angle_increment;
         let px: number, py: number;
         if (frame === 'base_link') {
@@ -571,7 +587,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     ctx.beginPath(); ctx.moveTo(robotCanvasX, robotCanvasY); ctx.lineTo(robotCanvasX + fwdDx, robotCanvasY + fwdDy); ctx.stroke();
 
     ctx.restore();
-  }, [scan, markers, doa, odom, mapTf, mapGrid, costmapGrid, localCostmapGrid, globalPlan, localPlan, frame, layers, view, width, height, boyIconImg, iconReady, goalPos, goalDraft, poseDraft, places, rooms]);
+  }, [scan, markers, doa, odom, mapTf, mapOdomTf, mapGrid, costmapGrid, localCostmapGrid, globalPlan, localPlan, frame, layers, view, width, height, boyIconImg, iconReady, goalPos, goalDraft, poseDraft, places, rooms]);
 
   // canvas上のピクセル座標 → ROS座標変換
   const canvasToRos = (px: number, py: number, rect: DOMRect) => {

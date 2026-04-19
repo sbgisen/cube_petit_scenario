@@ -5,8 +5,9 @@ import { MapView3D } from './MapView3D';
 import { Joystick } from './Joystick';
 import { CameraView } from './CameraView';
 import { QuickPhraseGrid } from './QuickPhraseGrid';
-import { useRosPublisher } from '../hooks/useRosTopic';
+import { useRosPublisher, useRosTopic } from '../hooks/useRosTopic';
 import { useRosAction } from '../hooks/useRosAction';
+import { useRosService } from '../hooks/useRosService';
 import { useSpeechServerAlive } from '../hooks/useRosNodeAlive';
 import type { LayerVisibility } from '../types/ros';
 
@@ -66,6 +67,17 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
   };
   const [mapSize, setMapSize] = useState<{ w: number; h: number }>({ w: 400, h: 400 });
 
+  const navStatus = useRosTopic<{ status_list: { status: number }[] }>(
+    ros, `/${namespace}/navigation/navigate_to_pose/_action/status`, 'action_msgs/GoalStatusArray', true,
+  );
+  const navFeedback = useRosTopic<{ feedback: { distance_remaining: number } }>(
+    ros, `/${namespace}/navigation/navigate_to_pose/_action/feedback`, 'nav2_msgs/action/NavigateToPose_FeedbackMessage', true,
+  );
+
+  const latestStatus = navStatus?.status_list?.slice(-1)[0]?.status ?? -1;
+  const distRemaining = navFeedback?.feedback?.distance_remaining;
+
+  const cancelNav = useRosService(ros, `/${namespace}/navigation/navigate_to_pose/_action/cancel_goal`, 'action_msgs/srv/CancelGoal');
   const publishGoal = useRosPublisher(ros, `/${namespace}/navigation/goal_pose`, 'geometry_msgs/PoseStamped');
   const publishInitialPose = useRosPublisher(ros, `/${namespace}/navigation/initialpose`, 'geometry_msgs/PoseWithCovarianceStamped');
   const sendSpeech = useRosAction(ros, `/${namespace}/speech_action_server`, 'cube_petit_speech_msgs/action/Speech');
@@ -199,14 +211,44 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         </div>
       </div>
 
+      <style>{`@keyframes navPulse { 0%,100%{opacity:1} 50%{opacity:0.45} }`}</style>
+
       {/* 下段: マップ + 右カラム */}
       <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0, overflow: 'hidden', alignItems: 'stretch' }}>
         {/* 左: マップ */}
-        <div ref={mapContainerRef} style={{ flex: 3, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
+        <div ref={mapContainerRef} style={{ flex: 3, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
           {is3D
             ? <MapView3D ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} />
             : <MapView   ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} mode={mapMode} frame={mapFrame} onGoal={handleGoal} onInitialPose={handleInitialPose} places={showPOI ? places : undefined} rooms={showPOI ? rooms : undefined} />
           }
+          {/* ナビゲーションステータスオーバーレイ */}
+          {(() => {
+            const cfg =
+              latestStatus === 2 ? { label: '移動中', sub: distRemaining != null ? `残り ${distRemaining.toFixed(1)} m` : '', bg: 'rgba(0,80,200,0.82)', pulse: true } :
+              latestStatus === 4 ? { label: '到着', sub: '', bg: 'rgba(0,150,60,0.82)', pulse: false } :
+              latestStatus === 6 ? { label: '移動失敗', sub: '', bg: 'rgba(180,20,20,0.82)', pulse: false } :
+              latestStatus === 5 ? { label: 'キャンセル', sub: '', bg: 'rgba(80,80,80,0.82)', pulse: false } :
+              latestStatus === 1 ? { label: '受付中…', sub: '', bg: 'rgba(60,60,60,0.82)', pulse: true } :
+              null;
+            if (!cfg) return null;
+            const canCancel = latestStatus === 1 || latestStatus === 2;
+            return (
+              <div style={{
+                position: 'absolute', top: 12, left: 12, zIndex: 10,
+                background: cfg.bg, borderRadius: 12, padding: '10px 18px',
+                animation: cfg.pulse ? 'navPulse 1.2s ease-in-out infinite' : 'none',
+              }}>
+                <div style={{ color: '#fff', fontSize: 28, fontWeight: 'bold', lineHeight: 1.1 }}>{cfg.label}</div>
+                {cfg.sub && <div style={{ color: 'rgba(255,255,255,0.8)', fontSize: 15, marginTop: 3 }}>{cfg.sub}</div>}
+                {canCancel && (
+                  <button onClick={() => cancelNav({ goal_info: { goal_id: { uuid: Array(16).fill(0) }, stamp: { sec: 0, nanosec: 0 } } }).catch(() => {})}
+                    style={{ marginTop: 8, padding: '4px 14px', borderRadius: 8, border: 'none', cursor: 'pointer', background: 'rgba(255,255,255,0.25)', color: '#fff', fontSize: 13 }}>
+                    キャンセル
+                  </button>
+                )}
+              </div>
+            );
+          })()}
         </div>
 
         {/* 右: カメラ + クイックフレーズ */}

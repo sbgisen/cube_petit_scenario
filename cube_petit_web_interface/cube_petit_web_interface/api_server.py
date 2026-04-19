@@ -59,6 +59,7 @@ _can_prev_rx: int = -1
 _can_stale: bool = False
 
 processes: dict[str, Optional[subprocess.Popen]] = {
+    'rosbridge':  None,
     'bringup':    None,
     'demo':       None,
     'anima':      None,
@@ -67,6 +68,7 @@ processes: dict[str, Optional[subprocess.Popen]] = {
 }
 
 LAUNCH_COMMANDS = {
+    'rosbridge':  ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml'],
     'bringup':    ['ros2', 'launch', 'cube_petit_bringup',    'cube_petit_bringup.launch.py'],
     'demo':       ['ros2', 'launch', 'cube_petit_scenario',   'cube_petit_talk_demo.launch.py'],
     'anima':      ['ros2', 'launch', 'cube_petit_anima',      'anima.launch.py'],
@@ -76,6 +78,7 @@ LAUNCH_COMMANDS = {
 
 # 各launchが起動中かを判定するノード名（部分一致）
 LAUNCH_NODE_MARKERS = {
+    'rosbridge':  'rosbridge_websocket',
     'bringup':    'robot_state_publisher',
     'demo':       'realtime_gpt_chat',
     'anima':      'behavior_node',
@@ -123,7 +126,7 @@ async def start_launch(target: str, map: Optional[str] = None, keepout: Optional
         return LaunchResponse(ok=False, message=f'Unknown target: {target}')
     if processes[target] and processes[target].poll() is None:
         return LaunchResponse(ok=False, message=f'{target} is already running')
-    if target == 'bringup':
+    if target in ('bringup', 'rosbridge'):
         subprocess.run(['fuser', '-k', '9090/tcp'], capture_output=True)
         import time; time.sleep(0.5)
     cmd = list(LAUNCH_COMMANDS[target])
@@ -534,7 +537,6 @@ async def activate_prompt(file: str, namespace: str = 'cube_petit_orange'):
     src = PROMPT_DIR / file
     if not src.exists():
         return {'ok': False, 'error': 'File not found'}
-    PROMPT_FILE.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
     ACTIVE_MARKER.write_text(file, encoding='utf-8')
     subprocess.run(
         ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'setting_file', str(src)],

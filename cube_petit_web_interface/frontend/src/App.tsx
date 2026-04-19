@@ -93,6 +93,20 @@ export default function App() {
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
   }, [isDark]);
 
+  const [rosbridgeRunning, setRosbridgeRunning] = useState(false);
+  useEffect(() => {
+    const poll = () =>
+      fetch(`${apiUrl}/launch/status`).then(r => r.json()).then(d => setRosbridgeRunning(!!d.rosbridge)).catch(() => {});
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => clearInterval(t);
+  }, [apiUrl]);
+  const toggleRosbridge = async () => {
+    const action = rosbridgeRunning ? 'stop' : 'start';
+    await fetch(`${apiUrl}/launch/rosbridge/${action}`, { method: 'POST' }).catch(() => {});
+    setTimeout(() => fetch(`${apiUrl}/launch/status`).then(r => r.json()).then(d => setRosbridgeRunning(!!d.rosbridge)).catch(() => {}), 1500);
+  };
+
   const [quickPhrases, setQuickPhrasesState] = useState<string[]>(loadQuickPhrases);
   const setQuickPhrases = (phrases: string[]) => {
     setQuickPhrasesState(phrases);
@@ -165,6 +179,16 @@ export default function App() {
           <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor }} />
           <span style={{ fontSize: 12, color: 'var(--t-text-dim)' }}>{status}</span>
         </div>
+
+        {/* rosbridge 起動/停止 */}
+        <button onClick={toggleRosbridge} style={{
+          padding: '5px 12px', borderRadius: 20, border: 'none', cursor: 'pointer', fontSize: 12, flexShrink: 0,
+          background: rosbridgeRunning ? 'rgba(0,204,102,0.2)' : 'rgba(204,51,51,0.2)',
+          color: rosbridgeRunning ? '#00cc66' : '#cc3333',
+          outline: `1px solid ${rosbridgeRunning ? '#00cc66' : '#cc3333'}`,
+        }}>
+          rosbridge {rosbridgeRunning ? '▶' : '■'}
+        </button>
 
         {/* テーマ */}
         <button
