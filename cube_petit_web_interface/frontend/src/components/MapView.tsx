@@ -49,6 +49,24 @@ interface OccupancyGrid {
 export type MapMode = 'view' | 'goal' | 'initialpose';
 export type MapFrame = 'base_link' | 'odom' | 'map';
 
+export interface MapPlace {
+  name: string;
+  x: number;
+  y: number;
+  yaw: number;
+  category: string;
+}
+
+export interface MapRoomOverlay {
+  name: string;
+  points: [number, number][];
+}
+
+const CAT_COLORS: Record<string, string> = {
+  dock: '#ff6600', favorite: '#ffcc00', patrol: '#00aaff', initial_pose: '#00ff88',
+};
+const ROOM_COLORS = ['#aa44ff', '#ff44aa', '#44aaff', '#ffaa44', '#44ffaa'];
+
 interface Props {
   ros: ROSLIB.Ros | null;
   namespace: string;
@@ -59,6 +77,8 @@ interface Props {
   frame?: MapFrame;
   onGoal?: (rosX: number, rosY: number, yaw: number) => void;
   onInitialPose?: (rosX: number, rosY: number, yaw: number) => void;
+  places?: MapPlace[];
+  rooms?: MapRoomOverlay[];
 }
 
 interface ViewState {
@@ -78,7 +98,7 @@ const SCAN_ANGLE_OFFSET = Math.PI / 2;
 // BoyIcon SVG path (from @mui/icons-material/Boy)
 const BOY_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28"><path fill="#ff4444" d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9 1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/></svg>`;
 
-export function MapView({ ros, namespace, layers, width, height, mode = 'view', frame = 'base_link', onGoal, onInitialPose }: Props) {
+export function MapView({ ros, namespace, layers, width, height, mode = 'view', frame = 'base_link', onGoal, onInitialPose, places, rooms }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [view, setView] = useState<ViewState>({ scale: 1, rotation: 0, offsetX: 0, offsetY: 0 });
   // goal: 確定済みゴール。draft: ドラッグ中の仮ゴール
@@ -108,7 +128,8 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
   const odom = useRosTopic<Odometry>(ros, `/${namespace}/odom`, 'nav_msgs/Odometry', frame === 'odom' || layers.costmap);
   const mapTf = useRosTf(ros, 'map', `${namespace}/base_link`, frame === 'map' || layers.map || layers.plan);
   const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map);
-  const costmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/local_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
+  const costmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/global_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
+  const localCostmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/local_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
   const globalPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/plan`, 'nav_msgs/Path', layers.plan);
   const localPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/local_plan`, 'nav_msgs/Path', layers.plan);
 
@@ -199,6 +220,36 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     costmapImageRef.current = offscreen;
   }, [costmapGrid]);
 
+  const localCostmapImageRef = useRef<HTMLCanvasElement | null>(null);
+
+  useEffect(() => {
+    if (!localCostmapGrid) { localCostmapImageRef.current = null; return; }
+    const { width: mw, height: mh } = localCostmapGrid.info;
+    const offscreen = document.createElement('canvas');
+    offscreen.width = mw; offscreen.height = mh;
+    const ctx2 = offscreen.getContext('2d');
+    if (!ctx2) return;
+    const imageData = ctx2.createImageData(mw, mh);
+    for (let i = 0; i < localCostmapGrid.data.length; i++) {
+      const val = localCostmapGrid.data[i];
+      const row = Math.floor(i / mw);
+      const col = i % mw;
+      const flippedRow = mh - 1 - row;
+      const idx = (flippedRow * mw + col) * 4;
+      if (val <= 0 || val === -1) {
+        imageData.data[idx+3] = 0;
+      } else if (val === 100) {
+        imageData.data[idx] = 255; imageData.data[idx+1] = 160; imageData.data[idx+2] = 0; imageData.data[idx+3] = 140; // 障害物→オレンジ
+      } else {
+        const t = val / 99;
+        imageData.data[idx] = 255; imageData.data[idx+1] = 160; imageData.data[idx+2] = 0;
+        imageData.data[idx+3] = Math.round(15 + t * 50);
+      }
+    }
+    ctx2.putImageData(imageData, 0, 0);
+    localCostmapImageRef.current = offscreen;
+  }, [localCostmapGrid]);
+
   const lastTouchRef = useRef<{ dist: number; angle: number } | null>(null);
   const dragRef = useRef<{ x: number; y: number } | null>(null);
 
@@ -266,18 +317,35 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       ctx.restore();
     }
 
-    // ローカルコストマップ描画 (odomフレーム基準)
+    // グローバルコストマップ描画 (mapフレーム基準)
     if (costmapImageRef.current && costmapGrid && layers.costmap) {
       const cmImg = costmapImageRef.current;
       const { resolution: res, width: mw, height: mh, origin } = costmapGrid.info;
       const ox = origin.position.x;
       const oy = origin.position.y;
-      // コストマップはodom座標系: odomフレームは原点=odom(0,0)なのでオフセット不要
-      const ref_rx = inMapFrame ? robot_map_x : inOdomFrame ? 0 : robot_odom_x;
-      const ref_ry = inMapFrame ? robot_map_y : inOdomFrame ? 0 : robot_odom_y;
+      // グローバルコストマップはmap座標系: mapフレームと同じオフセット
+      const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
+      const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
       const pxPerM = res * s;
       const mapX0 = -(oy + (mh - 1) * res - ref_ry) * s;
       const mapY0 = -(ox - ref_rx) * s;
+      ctx.save();
+      ctx.transform(0, -pxPerM, pxPerM, 0, mapX0, mapY0);
+      ctx.drawImage(cmImg, 0, 0);
+      ctx.restore();
+    }
+
+    // ローカルコストマップ描画 (odomフレーム基準)
+    if (localCostmapImageRef.current && localCostmapGrid && layers.costmap) {
+      const cmImg = localCostmapImageRef.current;
+      const { resolution: res, width: mw, height: mh, origin } = localCostmapGrid.info;
+      const ox = origin.position.x;
+      const oy = origin.position.y;
+      const local_ref_rx = inMapFrame ? (robot_odom_x - robot_map_x) : inOdomFrame ? 0 : robot_odom_x;
+      const local_ref_ry = inMapFrame ? (robot_odom_y - robot_map_y) : inOdomFrame ? 0 : robot_odom_y;
+      const pxPerM = res * s;
+      const mapX0 = -(oy + (mh - 1) * res - local_ref_ry) * s;
+      const mapY0 = -(ox - local_ref_rx) * s;
       ctx.save();
       ctx.transform(0, -pxPerM, pxPerM, 0, mapX0, mapY0);
       ctx.drawImage(cmImg, 0, 0);
@@ -443,6 +511,56 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       if (localPlan)  drawPath(localPlan,  'rgba(255, 200, 0, 0.9)', 3);
     }
 
+    // rooms / places (map frame)
+    const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
+    const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
+
+    if (rooms && rooms.length > 0) {
+      rooms.forEach((room, idx) => {
+        if (!room.points || room.points.length < 3) return;
+        const color = ROOM_COLORS[idx % ROOM_COLORS.length];
+        const pts = room.points.map(([wx, wy]: [number, number]) => ({
+          px: -(wy - ref_ry) * s,
+          py: -(wx - ref_rx) * s,
+        }));
+        ctx.save();
+        ctx.beginPath();
+        pts.forEach(({ px: ppx, py: ppy }, i) => i === 0 ? ctx.moveTo(ppx, ppy) : ctx.lineTo(ppx, ppy));
+        ctx.closePath();
+        ctx.globalAlpha = 0.18; ctx.fillStyle = color; ctx.fill();
+        ctx.globalAlpha = 1; ctx.strokeStyle = color; ctx.lineWidth = 1.5; ctx.stroke();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(pts[0].px, pts[0].py);
+        ctx.rotate(-rotation);
+        ctx.fillStyle = color; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText(room.name, 3, 12);
+        ctx.restore();
+      });
+    }
+
+    if (places && places.length > 0) {
+      places.forEach(place => {
+        const ppx = -(place.y - ref_ry) * s;
+        const ppy = -(place.x - ref_rx) * s;
+        const color = CAT_COLORS[place.category] || '#ffffff';
+        ctx.save();
+        ctx.fillStyle = color;
+        ctx.beginPath(); ctx.arc(ppx, ppy, 5, 0, Math.PI * 2); ctx.fill();
+        const adx = -Math.sin(place.yaw) * 12;
+        const ady = -Math.cos(place.yaw) * 12;
+        ctx.strokeStyle = color; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.moveTo(ppx, ppy); ctx.lineTo(ppx + adx, ppy + ady); ctx.stroke();
+        ctx.restore();
+        ctx.save();
+        ctx.translate(ppx, ppy);
+        ctx.rotate(-rotation);
+        ctx.fillStyle = color; ctx.font = '11px sans-serif'; ctx.textAlign = 'left';
+        ctx.fillText(place.name, 7, 4);
+        ctx.restore();
+      });
+    }
+
     // ロボット（mapフレームではTF位置に、それ以外は原点に描画）
     ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(robotCanvasX, robotCanvasY, 12, 0, Math.PI * 2); ctx.stroke();
@@ -453,7 +571,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     ctx.beginPath(); ctx.moveTo(robotCanvasX, robotCanvasY); ctx.lineTo(robotCanvasX + fwdDx, robotCanvasY + fwdDy); ctx.stroke();
 
     ctx.restore();
-  }, [scan, markers, doa, odom, mapTf, mapGrid, costmapGrid, globalPlan, localPlan, frame, layers, view, width, height, boyIconImg, iconReady, goalPos, goalDraft, poseDraft]);
+  }, [scan, markers, doa, odom, mapTf, mapGrid, costmapGrid, localCostmapGrid, globalPlan, localPlan, frame, layers, view, width, height, boyIconImg, iconReady, goalPos, goalDraft, poseDraft, places, rooms]);
 
   // canvas上のピクセル座標 → ROS座標変換
   const canvasToRos = (px: number, py: number, rect: DOMRect) => {

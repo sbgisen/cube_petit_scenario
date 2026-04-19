@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as ROSLIB from 'roslib';
-import { MapView, type MapMode, type MapFrame } from './MapView';
+import { MapView, type MapMode, type MapFrame, type MapPlace, type MapRoomOverlay } from './MapView';
 import { MapView3D } from './MapView3D';
 import { Joystick } from './Joystick';
 import { CameraView } from './CameraView';
@@ -13,6 +13,7 @@ import type { LayerVisibility } from '../types/ros';
 interface Props {
   ros: ROSLIB.Ros | null;
   namespace: string;
+  apiUrl: string;
   quickPhrases: string[];
   setQuickPhrases: (phrases: string[]) => void;
 }
@@ -20,20 +21,44 @@ interface Props {
 const LAYER_LABELS: { key: keyof LayerVisibility; label: string }[] = [
   { key: 'lidar',   label: 'LiDAR' },
   { key: 'camera',  label: 'カメラ' },
-  { key: 'doa',     label: '音源方向' },
+  { key: 'doa',     label: '音源' },
   { key: 'people',  label: '人' },
   { key: 'map',     label: 'マップ' },
   { key: 'costmap', label: 'コスト' },
   { key: 'plan',    label: 'プラン' },
 ];
 
-export function OperationTab({ ros, namespace, quickPhrases, setQuickPhrases }: Props) {
+export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhrases }: Props) {
   const [layers, setLayers] = useState<LayerVisibility>({
     lidar: true, map: true, costmap: true, plan: true, people: true, doa: true, camera: true,
   });
   const [is3D, setIs3D] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>('view');
   const [mapFrame, setMapFrame] = useState<MapFrame>('base_link');
+  const [showPOI, setShowPOI] = useState(false);
+  const [poiMap, setPoiMap] = useState(() => localStorage.getItem('nav_selected_map') || '');
+  const [poiMaps, setPoiMaps] = useState<string[]>([]);
+  const [places, setPlaces] = useState<MapPlace[]>([]);
+  const [rooms, setRooms] = useState<MapRoomOverlay[]>([]);
+
+  useEffect(() => {
+    fetch(`${apiUrl}/map/list`)
+      .then(r => r.json())
+      .then(d => {
+        const list: string[] = d.maps || [];
+        setPoiMaps(list);
+        setPoiMap(p => (p && list.includes(p)) ? p : (list[0] || ''));
+      })
+      .catch(() => {});
+  }, [apiUrl]);
+
+  useEffect(() => {
+    if (!showPOI || !poiMap) { setPlaces([]); setRooms([]); return; }
+    fetch(`${apiUrl}/map/places?map_name=${encodeURIComponent(poiMap)}`)
+      .then(r => r.json()).then(d => setPlaces(d.places || [])).catch(() => {});
+    fetch(`${apiUrl}/map/rooms?map_name=${encodeURIComponent(poiMap)}`)
+      .then(r => r.json()).then(d => setRooms(d.rooms || [])).catch(() => {});
+  }, [showPOI, poiMap, apiUrl]);
 
   const handleSetMapMode = (m: MapMode) => {
     setMapMode(m);
@@ -115,10 +140,24 @@ export function OperationTab({ ros, namespace, quickPhrases, setQuickPhrases }: 
             {label}
           </button>
         ))}
+        <div style={{ display: 'flex', background: 'var(--t-border)', borderRadius: 20, overflow: 'hidden', alignItems: 'center' }}>
+          <button onClick={() => setShowPOI(v => !v)} style={{
+            padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13,
+            background: showPOI ? '#aa44ff' : 'transparent', color: 'var(--t-text)',
+          }}>
+            ポイント
+          </button>
+          {showPOI && poiMaps.length > 0 && (
+            <select value={poiMap} onChange={e => setPoiMap(e.target.value)}
+              style={{ padding: '4px 4px', fontSize: 12, background: '#333', color: 'var(--t-text)', border: 'none', borderLeft: '1px solid #555', maxWidth: 110, cursor: 'pointer' }}>
+              {poiMaps.map(m => <option key={m} value={m}>{m}</option>)}
+            </select>
+          )}
+        </div>
         <div style={{ display: 'flex', gap: 6 }}>
           {/* 操作/目標モード */}
           <div style={{ display: 'flex', background: '#222', borderRadius: 20, overflow: 'hidden' }}>
-            {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期位置']] as [MapMode, string][]).map(([m, label]) => (
+            {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期']] as [MapMode, string][]).map(([m, label]) => (
               <button key={m} onClick={() => handleSetMapMode(m)} style={{
                 padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13,
                 background: mapMode === m ? '#0088ff' : 'transparent', color: 'var(--t-text)',
@@ -152,7 +191,7 @@ export function OperationTab({ ros, namespace, quickPhrases, setQuickPhrases }: 
                   background: mapFrame === f ? '#336633' : 'transparent',
                   color: 'var(--t-text)',
                 }}>
-                  {f}
+                  {f === 'base_link' ? 'base' : f}
                 </button>
               ))}
             </div>
@@ -166,7 +205,7 @@ export function OperationTab({ ros, namespace, quickPhrases, setQuickPhrases }: 
         <div ref={mapContainerRef} style={{ flex: 3, minWidth: 0, minHeight: 0, overflow: 'hidden' }}>
           {is3D
             ? <MapView3D ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} />
-            : <MapView   ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} mode={mapMode} frame={mapFrame} onGoal={handleGoal} onInitialPose={handleInitialPose} />
+            : <MapView   ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} mode={mapMode} frame={mapFrame} onGoal={handleGoal} onInitialPose={handleInitialPose} places={showPOI ? places : undefined} rooms={showPOI ? rooms : undefined} />
           }
         </div>
 

@@ -1,8 +1,12 @@
 import asyncio
 import base64
+import io
 import math
 import os
 import re
+import shutil
+import signal
+import struct
 import subprocess
 import threading
 from contextlib import asynccontextmanager
@@ -12,13 +16,16 @@ from typing import Optional
 import rclpy
 import yaml
 from rclpy.node import Node
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import Response
 from pydantic import BaseModel
+from PIL import Image
 
 ROS_ENV = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp'}
 
 MAP_BASE_DIR = Path('/home/cube-petit/ros/src/cube_petit_ros/cube_petit_navigation/map')
+MAP_EXTRA_DIR = Path('/home/cube-petit/map')
 PLACES_FILE = Path('/home/cube-petit/ros/src/cube_petit_ros/cube_petit_navigation/config/places.yaml')
 PROMPT_FILE = Path('/home/cube-petit/ros/src/cube_petit_interaction/cube_petit_chat/config/realtime_chat_setting.txt')
 
@@ -48,14 +55,32 @@ def _start_ros():
 _ros_thread = threading.Thread(target=_start_ros, daemon=True)
 _ros_thread.start()
 
+_can_prev_rx: int = -1
+_can_stale: bool = False
+
 processes: dict[str, Optional[subprocess.Popen]] = {
-    'bringup': None,
-    'demo': None,
+    'bringup':    None,
+    'demo':       None,
+    'anima':      None,
+    'create_map': None,
+    'navigation': None,
 }
 
 LAUNCH_COMMANDS = {
-    'bringup': ['ros2', 'launch', 'cube_petit_bringup', 'cube_petit_bringup.launch.py'],
-    'demo': ['ros2', 'launch', 'cube_petit_scenario', 'cube_petit_talk_demo.launch.py'],
+    'bringup':    ['ros2', 'launch', 'cube_petit_bringup',    'cube_petit_bringup.launch.py'],
+    'demo':       ['ros2', 'launch', 'cube_petit_scenario',   'cube_petit_talk_demo.launch.py'],
+    'anima':      ['ros2', 'launch', 'cube_petit_anima',      'anima.launch.py'],
+    'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map_orange.launch.py'],
+    'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation_orange.launch.py'],
+}
+
+# 各launchが起動中かを判定するノード名（部分一致）
+LAUNCH_NODE_MARKERS = {
+    'bringup':    'robot_state_publisher',
+    'demo':       'realtime_gpt_chat',
+    'anima':      'behavior_node',
+    'create_map': 'slam_toolbox',
+    'navigation': 'emcl',
 }
 
 
@@ -93,25 +118,70 @@ class PromptBody(BaseModel):
 
 
 @app.post('/launch/{target}/start', response_model=LaunchResponse)
-async def start_launch(target: str):
+async def start_launch(target: str, map: Optional[str] = None, keepout: Optional[str] = None):
     if target not in LAUNCH_COMMANDS:
         return LaunchResponse(ok=False, message=f'Unknown target: {target}')
     if processes[target] and processes[target].poll() is None:
         return LaunchResponse(ok=False, message=f'{target} is already running')
-    processes[target] = subprocess.Popen(LAUNCH_COMMANDS[target])
-    return LaunchResponse(ok=True, message=f'{target} started')
+    if target == 'bringup':
+        subprocess.run(['fuser', '-k', '9090/tcp'], capture_output=True)
+        import time; time.sleep(0.5)
+    cmd = list(LAUNCH_COMMANDS[target])
+    log_msg = ' '.join(cmd)
+    if target == 'navigation':
+        if map:
+            map_dir = _find_map_dir(map)
+            map_yaml = str(map_dir / 'map.yaml') if map_dir else map
+            cmd.append(f'map:={map_yaml}')
+            log_msg += f' map:={map_yaml}'
+        if keepout:
+            kp_dir = _find_map_dir(keepout)
+            kp_yaml = str(kp_dir / 'map_keepout.yaml') if kp_dir else keepout
+            cmd.append(f'keepout:={kp_yaml}')
+            log_msg += f' keepout:={kp_yaml}'
+    processes[target] = subprocess.Popen(cmd, env=ROS_ENV, preexec_fn=os.setsid)
+    return LaunchResponse(ok=True, message=log_msg)
+
+
+def _kill_by_launch_file(launch_file: str) -> bool:
+    """ランチファイル名でプロセスを探してプロセスグループごと停止する"""
+    result = subprocess.run(['pgrep', '-f', launch_file], capture_output=True, text=True)
+    killed = False
+    for pid_str in result.stdout.strip().split():
+        try:
+            os.killpg(os.getpgid(int(pid_str)), signal.SIGTERM)
+            killed = True
+        except Exception:
+            pass
+    return killed
 
 
 @app.post('/launch/{target}/stop', response_model=LaunchResponse)
 async def stop_launch(target: str):
     if target not in processes:
         return LaunchResponse(ok=False, message=f'Unknown target: {target}')
+
+    killed = False
+
+    # 自前で起動したプロセスグループを停止
     proc = processes[target]
-    if not proc or proc.poll() is not None:
-        return LaunchResponse(ok=False, message=f'{target} is not running')
-    proc.terminate()
+    if proc and proc.poll() is None:
+        try:
+            os.killpg(os.getpgid(proc.pid), signal.SIGTERM)
+            killed = True
+        except Exception:
+            proc.terminate()
+            killed = True
     processes[target] = None
-    return LaunchResponse(ok=True, message=f'{target} stopped')
+
+    # 外部起動のプロセスも探して停止
+    launch_file = LAUNCH_COMMANDS[target][-1]
+    if _kill_by_launch_file(launch_file):
+        killed = True
+
+    if killed:
+        return LaunchResponse(ok=True, message=f'{target} stopped')
+    return LaunchResponse(ok=False, message=f'{target} is not running')
 
 
 @app.get('/action/exists')
@@ -124,9 +194,89 @@ async def action_exists(name: str):
         return {'exists': False}
 
 
+@app.get('/system/devices')
+async def get_system_devices():
+    import os as _os
+    result: dict = {}
+
+    # IP (IPv4のみ)
+    try:
+        r = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=3)
+        result['ip'] = [ip for ip in r.stdout.strip().split() if ':' not in ip]
+    except Exception:
+        result['ip'] = []
+
+    # CAN0 ネットワークインターフェース + 受信統計
+    global _can_prev_rx, _can_stale
+    try:
+        r = subprocess.run(['ip', '-s', 'link', 'show', 'can0'], capture_output=True, text=True, timeout=3)
+        up = r.returncode == 0 and 'UP' in r.stdout
+        result['can0'] = up
+        if up:
+            m = re.search(r'RX:.*?\n\s+(\d+)\s+(\d+)\s+(\d+)', r.stdout)
+            if m:
+                rx_packets = int(m.group(2))
+                rx_errors  = int(m.group(3))
+                if _can_prev_rx < 0:
+                    _can_stale = False
+                else:
+                    _can_stale = (rx_packets == _can_prev_rx)
+                _can_prev_rx = rx_packets
+                result['can_rx']     = rx_packets
+                result['can_errors'] = rx_errors
+                result['can_stale']  = _can_stale
+    except Exception:
+        result['can0'] = False
+
+    # シリアルデバイス（udevシンボリックリンク）
+    result['lidar']    = _os.path.exists('/dev/ttyLD06-19')
+    result['imu']      = _os.path.exists('/dev/ttyWitMotion')
+    result['canable']  = _os.path.exists('/dev/ttyCANable')
+
+    # USB接続（lsusb）
+    try:
+        r = subprocess.run(['lsusb'], capture_output=True, text=True, timeout=5)
+        lines = r.stdout.splitlines()
+        result['realsense'] = any('8086:0b' in l or 'RealSense' in l for l in lines)
+        result['oak']       = any('03e7:' in l or 'Movidius' in l or 'Myriad' in l for l in lines)
+    except Exception:
+        result['realsense'] = False
+        result['oak']       = False
+
+    return result
+
+
+@app.post('/launch/kill_all')
+async def kill_all_ros():
+    subprocess.run(['pkill', 'ros'], capture_output=True)
+    subprocess.run(['pkill', 'ros2'], capture_output=True)
+    for k in processes:
+        processes[k] = None
+    return {'ok': True}
+
+
+@app.get('/ros/nodes')
+async def get_ros_nodes():
+    try:
+        result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=5, env=ROS_ENV)
+        nodes = [n.strip() for n in result.stdout.splitlines() if n.strip()]
+        return {'nodes': nodes}
+    except Exception as e:
+        return {'nodes': [], 'error': str(e)}
+
+
 @app.get('/launch/status')
 async def get_status():
-    return {target: proc is not None and proc.poll() is None for target, proc in processes.items()}
+    try:
+        result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=5, env=ROS_ENV)
+        node_output = result.stdout
+        status = {}
+        for target, marker in LAUNCH_NODE_MARKERS.items():
+            proc_alive = processes[target] is not None and processes[target].poll() is None
+            status[target] = proc_alive or (marker in node_output)
+        return status
+    except Exception:
+        return {target: proc is not None and proc.poll() is None for target, proc in processes.items()}
 
 
 # --- 会話ステータス ---
@@ -238,8 +388,9 @@ async def set_audio_volume(type: str, value: int):
 
 @app.get('/map/list')
 async def list_maps():
-    maps = sorted([d.name for d in MAP_BASE_DIR.iterdir() if d.is_dir()])
-    return {'maps': maps}
+    dirs = [MAP_BASE_DIR, MAP_EXTRA_DIR]
+    names = sorted({d.name for base in dirs if base.exists() for d in base.iterdir() if d.is_dir()})
+    return {'maps': names}
 
 
 @app.post('/map/load')
@@ -288,6 +439,14 @@ def _get_robot_pose(namespace: str) -> Optional[list[float]]:
         return None
 
 
+@app.get('/ros/robot_pose')
+async def get_robot_pose_endpoint(namespace: str = 'cube_petit_orange'):
+    pose = _get_robot_pose(namespace)
+    if pose is None:
+        return {'ok': False}
+    return {'ok': True, 'x': pose[0], 'y': pose[1], 'yaw': pose[2]}
+
+
 @app.get('/places')
 async def get_places():
     data = _load_places()
@@ -328,17 +487,520 @@ async def remove_place(category: str, name: str):
     return {'ok': True}
 
 
-# --- プロンプト ---
+# --- プロンプト / ヒストリー ---
+
+PROMPT_DIR = PROMPT_FILE.parent
+ACTIVE_MARKER = PROMPT_DIR / '.active_prompt'
+PROTECTED_PROMPTS = {'realtime_chat_setting.txt', 'gpt_chat_setting.txt'}
+
+HISTORY_DIR = Path('/home/cube-petit/ros/src/cube_petit_interaction/cube_petit_chat/resource/history')
+HISTORY_ACTIVE_MARKER = HISTORY_DIR / '.active_history'
+PROTECTED_HISTORY = {'history.jsonl'}
+
+
+def _active_prompt_name() -> str:
+    if ACTIVE_MARKER.exists():
+        name = ACTIVE_MARKER.read_text(encoding='utf-8').strip()
+        if (PROMPT_DIR / name).exists():
+            return name
+    return PROMPT_FILE.name
+
+
+@app.get('/prompt/list')
+async def list_prompts():
+    files = sorted(p.name for p in PROMPT_DIR.glob('*.txt'))
+    return {'files': files, 'active': _active_prompt_name()}
+
 
 @app.get('/prompt')
-async def get_prompt():
-    content = PROMPT_FILE.read_text(encoding='utf-8') if PROMPT_FILE.exists() else ''
-    return {'content': content, 'file': str(PROMPT_FILE)}
+async def get_prompt(file: Optional[str] = None):
+    path = PROMPT_DIR / file if file else PROMPT_FILE
+    content = path.read_text(encoding='utf-8') if path.exists() else ''
+    return {'content': content, 'file': path.name}
 
 
 @app.post('/prompt')
-async def set_prompt(body: PromptBody):
-    PROMPT_FILE.write_text(body.content, encoding='utf-8')
+async def set_prompt(body: PromptBody, file: Optional[str] = None):
+    name = file or PROMPT_FILE.name
+    if name in PROTECTED_PROMPTS:
+        return {'ok': False, 'error': 'Protected file'}
+    path = PROMPT_DIR / name
+    path.write_text(body.content, encoding='utf-8')
+    return {'ok': True}
+
+
+@app.post('/prompt/activate')
+async def activate_prompt(file: str, namespace: str = 'cube_petit_orange'):
+    src = PROMPT_DIR / file
+    if not src.exists():
+        return {'ok': False, 'error': 'File not found'}
+    PROMPT_FILE.write_text(src.read_text(encoding='utf-8'), encoding='utf-8')
+    ACTIVE_MARKER.write_text(file, encoding='utf-8')
+    subprocess.run(
+        ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'setting_file', str(src)],
+        capture_output=True, timeout=5, env=ROS_ENV,
+    )
+    return {'ok': True}
+
+
+@app.post('/prompt/new')
+async def new_prompt(name: str):
+    if not name.endswith('.txt'):
+        name += '.txt'
+    path = PROMPT_DIR / name
+    if path.exists():
+        return {'ok': False, 'error': 'Already exists'}
+    path.write_text('', encoding='utf-8')
+    return {'ok': True, 'file': name}
+
+
+@app.delete('/prompt')
+async def delete_prompt(file: str):
+    if file in PROTECTED_PROMPTS:
+        return {'ok': False, 'error': 'Protected file'}
+    path = PROMPT_DIR / file
+    if path.exists():
+        path.unlink()
+    if ACTIVE_MARKER.exists() and ACTIVE_MARKER.read_text().strip() == file:
+        ACTIVE_MARKER.unlink()
+    return {'ok': True}
+
+
+@app.get('/history/list')
+async def list_history():
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    files = sorted(p.name for p in HISTORY_DIR.glob('*.jsonl'))
+    active = ''
+    if HISTORY_ACTIVE_MARKER.exists():
+        candidate = HISTORY_ACTIVE_MARKER.read_text(encoding='utf-8').strip()
+        if (HISTORY_DIR / candidate).exists():
+            active = candidate
+    if not active and files:
+        active = files[0]
+    return {'files': files, 'active': active}
+
+
+@app.post('/history/activate')
+async def activate_history(file: str, namespace: str = 'cube_petit_orange'):
+    path = HISTORY_DIR / file
+    if not path.exists():
+        HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+        path.touch()
+    HISTORY_ACTIVE_MARKER.write_text(file, encoding='utf-8')
+    subprocess.run(
+        ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'history_file', str(path)],
+        capture_output=True, timeout=5, env=ROS_ENV,
+    )
+    return {'ok': True}
+
+
+@app.post('/history/new')
+async def new_history(name: str):
+    if not name.endswith('.jsonl'):
+        name += '.jsonl'
+    path = HISTORY_DIR / name
+    if path.exists():
+        return {'ok': False, 'error': 'Already exists'}
+    HISTORY_DIR.mkdir(parents=True, exist_ok=True)
+    path.touch()
+    return {'ok': True, 'file': name}
+
+
+@app.delete('/history')
+async def delete_history(file: str):
+    if file in PROTECTED_HISTORY:
+        return {'ok': False, 'error': 'Protected file'}
+    path = HISTORY_DIR / file
+    if path.exists():
+        path.unlink()
+    if HISTORY_ACTIVE_MARKER.exists() and HISTORY_ACTIVE_MARKER.read_text().strip() == file:
+        HISTORY_ACTIVE_MARKER.unlink()
+    return {'ok': True}
+
+
+# --- マップ別 places.yaml ---
+
+def _map_places_path(map_name: str) -> Optional[Path]:
+    d = _find_map_dir(map_name)
+    return d / 'places.yaml' if d else None
+
+
+def _load_map_places(map_name: str) -> list:
+    p = _map_places_path(map_name)
+    if p and p.exists():
+        data = yaml.safe_load(p.read_text(encoding='utf-8')) or {}
+        return data.get('places', [])
+    return []
+
+
+def _save_map_places(map_name: str, places: list) -> None:
+    p = _map_places_path(map_name)
+    if p is None:
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.dump({'places': places}, allow_unicode=True, sort_keys=False), encoding='utf-8')
+
+
+@app.get('/map/places')
+async def get_map_places(map_name: str):
+    return {'places': _load_map_places(map_name)}
+
+
+class MapPlaceBody(BaseModel):
+    map_name: str
+    name: str
+    category: str = 'patrol'
+    x: float
+    y: float
+    yaw: float = 0.0
+
+
+@app.post('/map/places/add')
+async def add_map_place(body: MapPlaceBody):
+    places = _load_map_places(body.map_name)
+    places = [p for p in places if p.get('name') != body.name]
+    places.append({'name': body.name, 'category': body.category,
+                   'pose': [round(body.x, 3), round(body.y, 3), round(body.yaw, 3)]})
+    _save_map_places(body.map_name, places)
+    return {'ok': True}
+
+
+@app.post('/map/places/add_current')
+async def add_map_place_current(map_name: str, name: str, category: str = 'patrol',
+                                 namespace: str = 'cube_petit_orange'):
+    pose = _get_robot_pose(namespace)
+    if pose is None:
+        return {'ok': False, 'error': 'Cannot get robot position from TF'}
+    places = _load_map_places(map_name)
+    places = [p for p in places if p.get('name') != name]
+    places.append({'name': name, 'category': category, 'pose': pose})
+    _save_map_places(map_name, places)
+    return {'ok': True, 'pose': pose}
+
+
+@app.delete('/map/places/remove')
+async def remove_map_place(map_name: str, name: str):
+    places = _load_map_places(map_name)
+    places = [p for p in places if p.get('name') != name]
+    _save_map_places(map_name, places)
+    return {'ok': True}
+
+
+class PlaceManualBody(BaseModel):
+    name: str
+    category: str = 'patrol'
+    x: float
+    y: float
+    yaw: float = 0.0
+
+
+@app.post('/places/add_manual')
+async def add_place_manual(body: PlaceManualBody):
+    pose = [round(body.x, 3), round(body.y, 3), round(body.yaw, 3)]
+    data = _load_places()
+    section = data.setdefault(body.category, {'order': [], 'places': {}})
+    section.setdefault('order', [])
+    section.setdefault('places', {})
+    section['places'][body.name] = {'pose': pose, 'room': None}
+    if body.name not in section['order']:
+        section['order'].append(body.name)
+    _save_places(data)
+    return {'ok': True, 'pose': pose}
+
+
+def _find_map_dir(map_name: str) -> Optional[Path]:
+    for base in [MAP_BASE_DIR, MAP_EXTRA_DIR]:
+        d = base / map_name
+        if d.is_dir():
+            return d
+    return None
+
+
+def _pgm_to_png_bytes(pgm_path: Path) -> bytes:
+    img = Image.open(pgm_path).convert('L')
+    buf = io.BytesIO()
+    img.save(buf, format='PNG')
+    return buf.getvalue()
+
+
+def _png_bytes_to_pgm(png_data: bytes, pgm_path: Path) -> None:
+    img = Image.open(io.BytesIO(png_data)).convert('L')
+    img.save(str(pgm_path), format='PPM')
+    # PPM → PGM: rewrite header
+    pgm_path.write_bytes(_pil_to_pgm_bytes(img))
+
+
+def _pil_to_pgm_bytes(img: Image.Image) -> bytes:
+    w, h = img.size
+    header = f'P5\n{w} {h}\n255\n'.encode()
+    return header + img.tobytes()
+
+
+@app.get('/map/image')
+async def get_map_image(map_name: str, type: str = 'map'):
+    d = _find_map_dir(map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    suffix = '_keepout' if type == 'keepout' else ''
+    pgm = d / f'map{suffix}.pgm'
+    if not pgm.exists():
+        raise HTTPException(404, f'{pgm.name} not found')
+    png_bytes = _pgm_to_png_bytes(pgm)
+    return Response(content=png_bytes, media_type='image/png')
+
+
+@app.get('/map/meta')
+async def get_map_meta(map_name: str):
+    d = _find_map_dir(map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    yaml_path = d / 'map.yaml'
+    if not yaml_path.exists():
+        raise HTTPException(404, 'map.yaml not found')
+    with yaml_path.open() as f:
+        meta = yaml.safe_load(f)
+    return meta
+
+
+class KeepoutSaveBody(BaseModel):
+    map_name: str
+    png_base64: str
+
+
+@app.post('/map/keepout/save')
+async def save_keepout(body: KeepoutSaveBody):
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    png_data = base64.b64decode(body.png_base64)
+    img = Image.open(io.BytesIO(png_data)).convert('L')
+    pgm_path = d / 'map_keepout.pgm'
+    pgm_path.write_bytes(_pil_to_pgm_bytes(img))
+    # update keepout yaml image field
+    yaml_path = d / 'map_keepout.yaml'
+    if yaml_path.exists():
+        with yaml_path.open() as f:
+            meta = yaml.safe_load(f)
+        meta['image'] = 'map_keepout.pgm'
+        with yaml_path.open('w') as f:
+            yaml.safe_dump(meta, f, sort_keys=False)
+    return {'ok': True}
+
+
+class MapSaveBody(BaseModel):
+    map_name: str
+    dest: str = 'extra'  # 'extra' = /home/cube-petit/map, 'base' = nav pkg map dir
+
+
+@app.get('/map/preview')
+async def preview_map():
+    """現在のSLAMマップをPNGで返す（保存しない）"""
+    import tempfile
+    with tempfile.TemporaryDirectory() as tmp:
+        dest = Path(tmp) / 'map'
+        cmd = [
+            'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
+            '-f', str(dest),
+            '--ros-args', '-r', 'map:=/cube_petit_orange/navigation/map',
+        ]
+        try:
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=ROS_ENV)
+        except subprocess.TimeoutExpired:
+            raise HTTPException(504, 'map_saver timeout')
+        pgm = Path(tmp) / 'map.pgm'
+        if not pgm.exists():
+            raise HTTPException(503, 'Map not available (SLAM running?)')
+        png_bytes = _pgm_to_png_bytes(pgm)
+        yml = Path(tmp) / 'map.yaml'
+        meta = {}
+        if yml.exists():
+            with yml.open() as f:
+                meta = yaml.safe_load(f) or {}
+    from fastapi.responses import JSONResponse
+    b64 = base64.b64encode(png_bytes).decode()
+    return {'png_base64': b64, 'meta': meta}
+
+
+@app.post('/map/save')
+async def save_map(body: MapSaveBody):
+    base = MAP_EXTRA_DIR if body.dest == 'extra' else MAP_BASE_DIR
+    dest_dir = base / body.map_name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    dest_stem = str(dest_dir / 'map')
+    cmd = [
+        'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
+        '-f', dest_stem,
+        '--ros-args', '-r', 'map:=/cube_petit_orange/navigation/map',
+    ]
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=ROS_ENV)
+        if result.returncode != 0:
+            return {'ok': False, 'error': result.stderr.strip() or 'map_saver failed'}
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'error': 'timeout'}
+    except Exception as e:
+        return {'ok': False, 'error': str(e)}
+
+    # auto-generate keepout copy
+    pgm_src = dest_dir / 'map.pgm'
+    pgm_kp = dest_dir / 'map_keepout.pgm'
+    yaml_src = dest_dir / 'map.yaml'
+    yaml_kp = dest_dir / 'map_keepout.yaml'
+    if pgm_src.exists():
+        shutil.copy2(pgm_src, pgm_kp)
+    if yaml_src.exists():
+        with yaml_src.open() as f:
+            meta = yaml.safe_load(f)
+        meta['image'] = 'map_keepout.pgm'
+        with yaml_kp.open('w') as f:
+            yaml.safe_dump(meta, f, sort_keys=False)
+    return {'ok': True, 'dir': str(dest_dir)}
+
+
+class RotateBody(BaseModel):
+    map_name: str
+    degrees: float  # any angle
+
+
+@app.post('/map/rotate')
+async def rotate_map(body: RotateBody):
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    angle = body.degrees % 360
+
+    fill_values = {'': 205, '_keepout': 254}
+    for suffix, fill in fill_values.items():
+        pgm = d / f'map{suffix}.pgm'
+        yml = d / f'map{suffix}.yaml'
+        if not pgm.exists():
+            continue
+        img = Image.open(pgm).convert('L')
+        rotated = img.rotate(-angle, expand=True, fillcolor=fill)
+        pgm.write_bytes(_pil_to_pgm_bytes(rotated))
+        if yml.exists():
+            with yml.open() as f:
+                meta = yaml.safe_load(f)
+            res = meta.get('resolution', 0.05)
+            ox, oy = meta.get('origin', [0, 0, 0])[:2]
+            w, h = img.size
+            rw, rh = rotated.size
+            # preserve world center
+            cx = ox + w * res / 2
+            cy = oy + h * res / 2
+            meta['origin'] = [round(cx - rw * res / 2, 4), round(cy - rh * res / 2, 4), 0]
+            with yml.open('w') as f:
+                yaml.safe_dump(meta, f, sort_keys=False)
+    return {'ok': True}
+
+
+# --- マップ別 rooms.yaml ---
+
+def _map_rooms_path(map_name: str) -> Optional[Path]:
+    d = _find_map_dir(map_name)
+    return d / 'rooms.yaml' if d else None
+
+
+def _load_map_rooms(map_name: str) -> list:
+    p = _map_rooms_path(map_name)
+    if p and p.exists():
+        data = yaml.safe_load(p.read_text(encoding='utf-8')) or {}
+        return data.get('rooms', [])
+    return []
+
+
+def _save_map_rooms(map_name: str, rooms: list) -> None:
+    p = _map_rooms_path(map_name)
+    if p is None:
+        return
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(yaml.dump({'rooms': rooms}, allow_unicode=True, sort_keys=False), encoding='utf-8')
+
+
+@app.get('/map/rooms')
+async def get_map_rooms(map_name: str):
+    return {'rooms': _load_map_rooms(map_name)}
+
+
+class RoomBody(BaseModel):
+    map_name: str
+    name: str
+    points: list  # [[x,y], ...] world coords
+
+
+@app.post('/map/rooms/add')
+async def add_map_room(body: RoomBody):
+    rooms = _load_map_rooms(body.map_name)
+    rooms = [r for r in rooms if r.get('name') != body.name]
+    pts = [[round(p[0], 3), round(p[1], 3)] for p in body.points]
+    rooms.append({'name': body.name, 'points': pts})
+    _save_map_rooms(body.map_name, rooms)
+    return {'ok': True}
+
+
+@app.delete('/map/rooms/remove')
+async def remove_map_room(map_name: str, name: str):
+    rooms = _load_map_rooms(map_name)
+    rooms = [r for r in rooms if r.get('name') != name]
+    _save_map_rooms(map_name, rooms)
+    return {'ok': True}
+
+
+# --- places 順序変更 ---
+
+class PlacesReorderBody(BaseModel):
+    map_name: str
+    places: list  # full ordered list
+
+
+@app.post('/map/places/reorder')
+async def reorder_map_places(body: PlacesReorderBody):
+    _save_map_places(body.map_name, body.places)
+    return {'ok': True}
+
+
+# --- 初期位置設定 ---
+
+@app.post('/map/initial_pose')
+async def set_initial_pose(x: float, y: float, yaw: float,
+                           namespace: str = 'cube_petit_orange'):
+    qz = math.sin(yaw / 2)
+    qw = math.cos(yaw / 2)
+    msg = (
+        f'{{header: {{frame_id: map}}, pose: {{pose: {{'
+        f'position: {{x: {x}, y: {y}, z: 0.0}}, '
+        f'orientation: {{x: 0.0, y: 0.0, z: {qz:.6f}, w: {qw:.6f}}}'
+        f'}}}}}}'
+    )
+    cmd = [
+        'ros2', 'topic', 'pub', '--once',
+        f'/{namespace}/initialpose',
+        'geometry_msgs/PoseWithCovarianceStamped', msg,
+    ]
+    subprocess.Popen(cmd, env=ROS_ENV,
+                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    return {'ok': True}
+
+
+@app.post('/map/places/rename')
+async def rename_map_place(map_name: str, old_name: str, new_name: str):
+    places = _load_map_places(map_name)
+    for p in places:
+        if p.get('name') == old_name:
+            p['name'] = new_name
+            break
+    _save_map_places(map_name, places)
+    return {'ok': True}
+
+
+@app.post('/map/rooms/rename')
+async def rename_map_room(map_name: str, old_name: str, new_name: str):
+    rooms = _load_map_rooms(map_name)
+    for r in rooms:
+        if r.get('name') == old_name:
+            r['name'] = new_name
+            break
+    _save_map_rooms(map_name, rooms)
     return {'ok': True}
 
 

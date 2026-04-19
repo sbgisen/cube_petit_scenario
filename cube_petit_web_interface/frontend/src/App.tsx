@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useRosConnection } from './hooks/useRosConnection';
 import { OperationTab } from './components/OperationTab';
 import { TalkTab } from './components/TalkTab';
@@ -7,17 +7,8 @@ import { CustomTab } from './components/CustomTab';
 import { MapTab } from './components/MapTab';
 import type { RobotConfig } from './types/ros';
 
-const HOST = window.location.hostname;
-
-const ROBOTS: RobotConfig[] = [
-  {
-    name: 'オレンジプチ',
-    namespace: 'cube_petit_orange',
-    rosbridgeUrl: `ws://${HOST}:9090`,
-  },
-];
-
-const API_URL = `http://${HOST}:8000`;
+const DEFAULT_HOST = window.location.hostname;
+const NAMESPACE = 'cube_petit_orange';
 
 const DARK_VARS: Record<string, string> = {
   '--t-bg':          '#0d0d1a',
@@ -55,7 +46,6 @@ function applyTheme(dark: boolean) {
   Object.entries(vars).forEach(([k, v]) => document.documentElement.style.setProperty(k, v));
 }
 
-// 初期テーマを同期適用（白フラッシュ防止）
 applyTheme(localStorage.getItem('theme') !== 'light');
 
 const DEFAULT_QUICK_PHRASES = ['こんにちは', 'こっちきて', 'オレンジプチです', '仲良くしてね'];
@@ -77,26 +67,44 @@ type Tab = 'operation' | 'talk' | 'map' | 'system' | 'custom';
 const TABS: { id: Tab; label: string }[] = [
   { id: 'operation', label: '操作' },
   { id: 'talk',      label: '会話' },
-  { id: 'map',       label: 'マップ' },
   { id: 'system',    label: 'システム' },
-  { id: 'custom',    label: 'カスタム' },
+  { id: 'custom',    label: 'カスタム会話' },
+  { id: 'map',       label: 'カスタムマップ' },
 ];
 
 export default function App() {
-  const [selectedRobot, setSelectedRobot] = useState<RobotConfig>(ROBOTS[0]);
+  const [host, setHost] = useState<string>(() => localStorage.getItem('robot_host') || DEFAULT_HOST);
+  const [inputHost, setInputHost] = useState<string>(host);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  const robot: RobotConfig = {
+    name: 'オレンジプチ',
+    namespace: NAMESPACE,
+    rosbridgeUrl: `ws://${host}:9090`,
+  };
+  const apiUrl = `http://${host}:8000`;
+
   const [tab, setTab] = useState<Tab>('operation');
-  const { ros, status } = useRosConnection(selectedRobot.rosbridgeUrl);
+  const { ros, status } = useRosConnection(robot.rosbridgeUrl);
   const [isDark, setIsDark] = useState(() => localStorage.getItem('theme') !== 'light');
 
   useEffect(() => {
     applyTheme(isDark);
     localStorage.setItem('theme', isDark ? 'dark' : 'light');
   }, [isDark]);
-  const [quickPhrases, setQuickPhrasesState] = useState<string[]>(loadQuickPhrases);
 
+  const [quickPhrases, setQuickPhrasesState] = useState<string[]>(loadQuickPhrases);
   const setQuickPhrases = (phrases: string[]) => {
     setQuickPhrasesState(phrases);
     localStorage.setItem(QUICK_PHRASES_KEY, JSON.stringify(phrases));
+  };
+
+  const connect = () => {
+    const trimmed = inputHost.trim();
+    if (!trimmed) return;
+    setHost(trimmed);
+    localStorage.setItem('robot_host', trimmed);
+    inputRef.current?.blur();
   };
 
   const statusColor = {
@@ -106,6 +114,8 @@ export default function App() {
     error: '#cc3333',
   }[status];
 
+  const hostChanged = inputHost.trim() !== host;
+
   return (
     <div style={{
       height: '100dvh', background: 'var(--t-bg)', color: 'var(--t-text)',
@@ -114,33 +124,51 @@ export default function App() {
     }}>
       {/* ヘッダー */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 12,
-        padding: 'calc(env(safe-area-inset-top) + 8px) 16px 8px', background: 'var(--t-surface)', borderBottom: '1px solid var(--t-border)',
+        display: 'flex', alignItems: 'center', gap: 10,
+        padding: 'calc(env(safe-area-inset-top) + 8px) 16px 8px',
+        background: 'var(--t-surface)', borderBottom: '1px solid var(--t-border)',
         flexShrink: 0,
       }}>
-        <select
-          value={selectedRobot.namespace}
-          onChange={(e) => {
-            const r = ROBOTS.find((r) => r.namespace === e.target.value);
-            if (r) setSelectedRobot(r);
-          }}
-          style={{
-            background: 'var(--t-surface2)', color: 'var(--t-text)', border: '1px solid var(--t-border2)',
-            borderRadius: 8, padding: '6px 10px', fontSize: 14,
-          }}
-        >
-          {ROBOTS.map((r) => (
-            <option key={r.namespace} value={r.namespace}>{r.name}</option>
-          ))}
-        </select>
+        {/* ロボット名 */}
+        <span style={{ fontSize: 14, color: 'var(--t-text)', whiteSpace: 'nowrap' }}>
+          オレンジプチ
+        </span>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: 6, width: 110, flexShrink: 0 }}>
-          <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor, flexShrink: 0 }} />
+        {/* IP入力 */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 4 }}>
+          <input
+            ref={inputRef}
+            value={inputHost}
+            onChange={e => setInputHost(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && connect()}
+            placeholder="192.168.1.x"
+            style={{
+              width: 130, padding: '5px 8px', borderRadius: 8, fontSize: 13,
+              background: 'var(--t-input-bg)', color: 'var(--t-text)',
+              border: `1px solid ${hostChanged ? '#ff6600' : 'var(--t-border2)'}`,
+              outline: 'none',
+            }}
+          />
+          {hostChanged && (
+            <button
+              onClick={connect}
+              style={{
+                padding: '5px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+                background: '#ff6600', color: '#fff', fontSize: 12,
+              }}
+            >接続</button>
+          )}
+        </div>
+
+        {/* 接続ステータス */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+          <div style={{ width: 8, height: 8, borderRadius: '50%', background: statusColor }} />
           <span style={{ fontSize: 12, color: 'var(--t-text-dim)' }}>{status}</span>
         </div>
 
+        {/* テーマ */}
         <button
-          onClick={() => setIsDark((d) => !d)}
+          onClick={() => setIsDark(d => !d)}
           style={{
             padding: '6px 12px', borderRadius: 20, border: 'none', cursor: 'pointer',
             background: 'var(--t-surface2)', color: 'var(--t-text)', fontSize: 16,
@@ -167,11 +195,11 @@ export default function App() {
 
       {/* コンテンツ */}
       <div style={{ flex: 1, padding: 12, overflow: 'hidden', minHeight: 0 }}>
-        {tab === 'operation' && <OperationTab ros={ros} namespace={selectedRobot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
-        {tab === 'talk'      && <TalkTab      ros={ros} namespace={selectedRobot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} apiUrl={API_URL} />}
-        {tab === 'system'    && <SystemPanel  ros={ros} namespace={selectedRobot.namespace} apiUrl={API_URL} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
-        {tab === 'map'       && <MapTab        namespace={selectedRobot.namespace} apiUrl={API_URL} />}
-        {tab === 'custom'    && <CustomTab    apiUrl={API_URL} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+        {tab === 'operation' && <OperationTab ros={ros} namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+        {tab === 'talk'      && <TalkTab      ros={ros} namespace={robot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} apiUrl={apiUrl} />}
+        {tab === 'system'    && <SystemPanel  namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+        {tab === 'map'       && <MapTab       namespace={robot.namespace} apiUrl={apiUrl} />}
+        {tab === 'custom'    && <CustomTab    apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
       </div>
     </div>
   );
