@@ -15,12 +15,14 @@ cube_petit_web_interface/
 │       ├── components/
 │       │   ├── OperationTab.tsx   # 操作タブ（マップ・ジョイスティック・カメラ）
 │       │   ├── TalkTab.tsx        # 会話タブ
-│       │   ├── MapView.tsx        # 2D マップ
+│       │   ├── SystemPanel.tsx    # システムタブ（launch 制御・ノード監視）
+│       │   ├── CustomTab.tsx      # カスタム会話タブ
+│       │   ├── MapTab.tsx         # カスタムマップタブ（ポイント・部屋編集）
+│       │   ├── MapView.tsx        # 2D マップ（Canvas）
 │       │   ├── MapView3D.tsx      # 3D マップ（Three.js）
 │       │   ├── Joystick.tsx       # 仮想ジョイスティック
 │       │   ├── CameraView.tsx     # カメラ映像
-│       │   ├── QuickPhraseGrid.tsx
-│       │   └── SystemPanel.tsx    # ノード死活・launch 制御
+│       │   └── QuickPhraseGrid.tsx
 │       └── hooks/
 │           ├── useRosConnection.ts
 │           ├── useRosTopic.ts
@@ -28,7 +30,7 @@ cube_petit_web_interface/
 │           ├── useRosAction.ts
 │           └── useRosService.ts
 ├── cube_petit_web_interface/
-│   ├── api_server.py          # FastAPI バックエンド（launch 制御）
+│   ├── api_server.py          # FastAPI バックエンド（launch 制御・マップ管理）
 │   └── internal_state_relay.py
 └── img/                       # ロボットアイコン画像
 ```
@@ -37,13 +39,13 @@ cube_petit_web_interface/
 
 | 用途 | ポート | プロトコル |
 |------|--------|-----------|
-| フロントエンド (dev) | 5173 | HTTP |
+| フロントエンド | 5173 | HTTP |
 | バックエンド API | 8000 | HTTP |
 | rosbridge | 9090 | WebSocket |
 
 ---
 
-## 起動手順
+## 起動手順（手動）
 
 ### 1. rosbridge の起動
 
@@ -56,17 +58,19 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
 
 ```bash
 cd ~/ros/src/cube_petit_scenario/cube_petit_web_interface
-python3 cube_petit_web_interface/api_server.py
+source /opt/ros/jazzy/setup.bash
+source ~/ros/install/setup.bash
+python3 -m uvicorn cube_petit_web_interface.api_server:app --host 0.0.0.0 --port 8000
 ```
 
-### 3. フロントエンド開発サーバーの起動
+### 3. フロントエンドの起動（手動時のみ）
 
-Node.js 20 以上が必要。nvm を使う場合：
+PC 起動時の自動起動が設定済みの場合は不要。
 
 ```bash
 source ~/.nvm/nvm.sh && nvm use 20
 cd ~/ros/src/cube_petit_scenario/cube_petit_web_interface/frontend
-npm run dev -- --host
+npm run dev
 ```
 
 ### 4. ブラウザでアクセス
@@ -76,7 +80,64 @@ npm run dev -- --host
 | ロボット PC | `http://localhost:5173` |
 | iPad / 他端末 | `http://<ロボットのIPアドレス>:5173` |
 
-> iPad から `localhost` は使えない。同一 LAN に接続してIPアドレスでアクセスする。
+> iPad から `localhost` は使えない。同一 LAN に接続して IP アドレスでアクセスする。
+
+---
+
+## フロントエンド自動起動（systemd サービス）
+
+PC 起動時にフロントエンドが自動で立ち上がるよう、systemd ユーザーサービスとして登録している。
+
+### サービスファイル
+
+`~/.config/systemd/user/cube-petit-frontend.service`
+
+```ini
+[Unit]
+Description=Cube Petit Web Interface Frontend (Vite)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/cube-petit/ros/src/cube_petit_scenario/cube_petit_web_interface/frontend
+ExecStart=/home/cube-petit/.nvm/versions/node/v20.20.2/bin/npm run dev -- --host
+Restart=on-failure
+RestartSec=5
+Environment=PATH=/home/cube-petit/.nvm/versions/node/v20.20.2/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+
+[Install]
+WantedBy=default.target
+```
+
+### 導入手順
+
+```bash
+# 1. サービスファイルを配置
+mkdir -p ~/.config/systemd/user/
+# 上記の内容で ~/.config/systemd/user/cube-petit-frontend.service を作成
+
+# 2. systemd に読み込ませる
+systemctl --user daemon-reload
+
+# 3. 自動起動を有効化してすぐ起動
+systemctl --user enable --now cube-petit-frontend.service
+
+# 4. ログイン不要で起動するよう linger を有効化
+loginctl enable-linger cube-petit
+```
+
+### 管理コマンド
+
+```bash
+systemctl --user status  cube-petit-frontend   # 状態確認
+systemctl --user start   cube-petit-frontend   # 起動
+systemctl --user stop    cube-petit-frontend   # 停止
+systemctl --user restart cube-petit-frontend   # 再起動
+journalctl --user -u cube-petit-frontend -f    # ログ追跡
+```
+
+> `vite.config.ts` でポートを 5173 固定・`strictPort: true` に設定済み。
+> ポートが競合している場合はサービス起動に失敗するので `lsof -ti :5173 | xargs kill -9` で解放する。
 
 ---
 
@@ -84,29 +145,41 @@ npm run dev -- --host
 
 ### 基本起動（bringup）
 
-Web UI の「起動」ボタンから起動できる。手動の場合：
+Web UI の「起動管理」から起動できる。手動の場合：
 
 ```bash
 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
   ros2 launch cube_petit_bringup cube_petit_bringup.launch.py
 ```
 
-### ナビゲーション（map フレーム・自律走行）
+### ナビゲーション（自律走行）
 
 ```bash
 RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
-  ros2 launch cube_petit_navigation navigation_orange.launch.py \
+  ros2 launch cube_petit_navigation navigation.launch.py \
   map:=/path/to/map.yaml \
-  keepout:=/path/to/keepout.yaml
+  keepout:=/path/to/map_keepout.yaml
 ```
+
+Web UI の「システム」タブ → 起動管理 → navigation からも起動可能。マップ・keepout はドロップダウンで選択する（選択すると自動でフルパスに変換される）。
 
 ナビゲーションが起動すると emcl2 が `map` TF を配信し、Web UI の map フレーム表示・ナビゲーションゴール送信が使えるようになる。
 
-### デモ（音声会話）
+### マップの保存場所
 
-```bash
-RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
-  ros2 launch cube_petit_scenario cube_petit_talk_demo.launch.py
+| ディレクトリ | 用途 |
+|------------|------|
+| `~/ros/src/cube_petit_ros/cube_petit_navigation/map/` | 既定マップ |
+| `~/map/` | Web UI から保存したマップ |
+
+各マップフォルダの構成：
+
+```
+<マップ名>/
+├── map.yaml / map.pgm          # 本体マップ
+├── map_keepout.yaml / .pgm     # keepout マスク
+├── places.yaml                 # ポイント一覧
+└── rooms.yaml                  # 部屋範囲一覧
 ```
 
 ---
@@ -121,17 +194,20 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
 |--------|---------|
 | LiDAR | LiDAR 点群（緑） |
 | カメラ | カメラ映像（右カラム） |
-| 音源方向 | DOA 方向矢印（黄色） |
+| 音源 | DOA 方向矢印（黄色） |
 | 人 | 検出した人のアイコン（赤） |
 | マップ | 占有格子地図 |
 | コスト | ローカルコストマップ（ピンク） |
 | プラン | グローバルプラン（緑）・ローカルプラン（黄） |
+| ポイント | places / rooms を地図上に重ね表示（紫 = ON）|
+
+「ポイント」ボタンの右のドロップダウンで表示するマップを切り替えられる。navigation 起動時に使用したマップが自動で選択される。
 
 ### フレーム切り替え
 
 | ボタン | 挙動 |
 |--------|------|
-| base_link | ロボットが常に中心。周囲が回転・移動する |
+| base | ロボットが常に中心。周囲が回転・移動する |
 | odom | odom 原点が中心。ロボットが移動する |
 | map | 地図が固定。ロボットが地図上を移動する（要ナビゲーション） |
 
@@ -143,18 +219,65 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
 |--------|------|
 | 🔄 操作 | ドラッグ: パン / ピンチ: ズーム / 2本指: 回転 |
 | 📍 目標 | タップ: 目標位置を置く / そのままドラッグ: 向きを設定して送信 |
-| 📌 初期位置 | タップ＆ドラッグで自己位置の初期値を設定して送信 |
+| 📌 初期 | タップ＆ドラッグで自己位置の初期値を設定して送信 |
 
 > 目標・初期位置はタップを離したタイミングで ROS に送信される。
 
 ### 2D / 3D 切り替え
 
 - **2D**: キャンバスベースの軽量マップ
-- **3D**: Three.js による 3D 表示（目標・初期位置モード中は 2D に固定）
+- **3D**: Three.js による 3D 表示（目標・初期モード中は 2D に固定）
 
 ### ジョイスティック
 
 画面右下に固定表示。ドラッグで並進・回転指令を送信する。
+
+---
+
+## システムタブの使い方
+
+### 起動管理
+
+各 launch をボタンで起動・停止できる。「ROS一括停止」ですべて終了。
+
+| launch | 内容 |
+|--------|------|
+| bringup | ロボット基本起動 |
+| anima | 感情・行動システム |
+| demo | 音声会話デモ |
+| create_map | SLAM マップ作成 |
+| navigation | 自律走行（マップ・keepout 選択あり） |
+
+### コマンドログ
+
+起動・停止の操作履歴をタイムスタンプ付きで表示する。
+
+### デバイス状態
+
+CAN0・LiDAR・IMU・CANable・RealSense・OAK の接続状態を表示。
+
+### ノード監視
+
+主要ノードの稼働状態をリアルタイムで確認できる。
+
+---
+
+## カスタムマップタブの使い方
+
+地図上にポイント（places）と部屋範囲（rooms）を登録・編集する。
+
+### モード
+
+| ボタン | 操作 |
+|--------|------|
+| 🖊 マップ編集 | keepout マスクを描画・消去 |
+| 📍 ポイント追加 | クリックで地図上にポイントを配置（カテゴリ・名前を指定） |
+| 🏠 部屋範囲 | 矩形または多角形で部屋の領域を指定 |
+| ✏️ 名前変更 | ポイント・部屋の名前をインライン編集 |
+
+### データの保存場所
+
+各マップフォルダの `places.yaml` / `rooms.yaml` に保存される。
 
 ---
 
@@ -164,15 +287,6 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
 - 会話内容がリアルタイムで表示される
 - **クイックフレーズ**: 登録した定型文をボタン 1 タップで発話
   - 「＋」ボタンで新しいフレーズを追加
-
----
-
-## システムパネル
-
-右上のメニューアイコンから開く。
-
-- **ノード監視**: 主要ノードの稼働状態を確認
-- **起動 / 停止**: bringup・demo の起動・停止
 
 ---
 
@@ -202,11 +316,21 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp \
 
 ### iPad から接続できない
 
-`localhost` は使えない。`--host` オプションつきで dev サーバーを起動し、ロボットの IP アドレスでアクセスする。
+`localhost` は使えない。ロボットの IP アドレスでアクセスする（例: `http://192.168.1.16:5173`）。
 
-### 接続が点滅する
+### フロントエンドが起動していない
 
-切断表示には 2 秒の遅延がある。短時間の再接続なら UI には表示されない。
+```bash
+systemctl --user status cube-petit-frontend
+journalctl --user -u cube-petit-frontend -n 30
+```
+
+ポート競合の場合:
+
+```bash
+lsof -ti :5173 | xargs kill -9
+systemctl --user restart cube-petit-frontend
+```
 
 ### map フレームで何も動かない
 
@@ -220,6 +344,10 @@ RMW_IMPLEMENTATION=rmw_cyclonedds_cpp ros2 topic echo /tf --once 2>/dev/null | g
 
 > `amcl_pose` トピックは使用しない。ロボットの map 座標は TF から取得している。
 
+### keepout がずれる・動く
+
+`local_costmap` の `global_frame` が `odom` のため、keepout フィルターはグローバルコストマップのみに適用する設定にしている（`nav2_params_orange.yaml` の `local_costmap.filters` は空）。
+
 ### Node.js バージョンエラー
 
 Vite 8 は Node.js 20 以上が必要：
@@ -227,25 +355,3 @@ Vite 8 は Node.js 20 以上が必要：
 ```bash
 source ~/.nvm/nvm.sh && nvm use 20
 ```
-
----
-
-## 設定変更
-
-### ロボットの追加・変更
-
-`frontend/src/App.tsx` の `ROBOTS` 配列を編集：
-
-```typescript
-const ROBOTS = [
-  {
-    name: 'オレンジプチ',
-    namespace: 'cube_petit_orange',
-    rosbridgeUrl: `ws://${HOST}:9090`,
-  },
-];
-```
-
-### rosbridge ポートの変更
-
-`App.tsx` の `rosbridgeUrl` と rosbridge の起動引数を合わせて変更する。
