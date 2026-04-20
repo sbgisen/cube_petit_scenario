@@ -56,7 +56,15 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
   useEffect(() => {
     if (!showPOI || !poiMap) { setPlaces([]); setRooms([]); return; }
     fetch(`${apiUrl}/map/places?map_name=${encodeURIComponent(poiMap)}`)
-      .then(r => r.json()).then(d => setPlaces(d.places || [])).catch(() => {});
+      .then(r => r.json()).then(d => setPlaces(
+        (d.places || []).map((p: { name: string; category: string; pose?: [number, number, number]; x?: number; y?: number; yaw?: number }) => ({
+          name: p.name,
+          category: p.category,
+          x: p.pose?.[0] ?? p.x ?? 0,
+          y: p.pose?.[1] ?? p.y ?? 0,
+          yaw: p.pose?.[2] ?? p.yaw ?? 0,
+        }))
+      )).catch(() => {});
     fetch(`${apiUrl}/map/rooms?map_name=${encodeURIComponent(poiMap)}`)
       .then(r => r.json()).then(d => setRooms(d.rooms || [])).catch(() => {});
   }, [showPOI, poiMap, apiUrl]);
