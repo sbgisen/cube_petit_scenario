@@ -1,34 +1,37 @@
-import rclpy
-from rclpy.node import Node
-from cube_petit_scenario_msgs.msg import InternalState
+# Copyright (c) 2026 SoftBank Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import random
 import socket
-from cube_petit_scenario_msgs.msg import InternalStateDelta
 
 from cube_petit_anima import internal_state_logic
-
+from cube_petit_scenario_msgs.msg import InternalState
+from cube_petit_scenario_msgs.msg import InternalStateDelta
+import rclpy
+from rclpy.node import Node
 
 
 class InternalStateNode(Node):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__('internal_state_node')
 
         # Publisher
-        self.pub = self.create_publisher(
-            InternalState,
-            'internal_state',
-            10
-        )
+        self.pub = self.create_publisher(InternalState, 'internal_state', 10)
 
         # Delta subscriber
-        self.delta_sub = self.create_subscription(
-            InternalStateDelta,
-            'internal_state_delta',
-            self.delta_callback,
-            10
-        )
+        self.delta_sub = self.create_subscription(InternalStateDelta, 'internal_state_delta', self.delta_callback, 10)
 
         # Hostname → namespace
         raw_hostname = socket.gethostname()
@@ -50,16 +53,12 @@ class InternalStateNode(Node):
         self.update_timer = self.create_timer(1.0, self.update_state)
         self.save_timer = self.create_timer(300.0, self.save_state)
 
-        
-
-        self.get_logger().info(
-            f"Anima initialized for host: {self.namespace}"
-        )
+        self.get_logger().info(f'Anima initialized for host: {self.namespace}')
 
     # ==================================
     # Delta input
     # ==================================
-    def delta_callback(self, msg):
+    def delta_callback(self, msg: InternalStateDelta) -> None:
         if msg.human_detected:
             self.human_detect_timer = 5
         self.delta_buffer.append(msg)
@@ -67,7 +66,7 @@ class InternalStateNode(Node):
     # ==================================
     # State update loop (1Hz)
     # ==================================
-    def update_state(self):
+    def update_state(self) -> None:
         if self.human_detect_timer > 0:
             self.human_detect_timer -= 1
             self.state.human_detected = True
@@ -78,19 +77,16 @@ class InternalStateNode(Node):
         base_d_curiosity = random.uniform(-0.05, 0.05)
 
         # msg → plain dict へ変換（計算は internal_state_logic に委譲）
-        deltas = [
-            {
-                'd_curiosity': delta.d_curiosity,
-                'd_boredom': delta.d_boredom,
-                'd_energy': delta.d_energy,
-                'd_silence_bias': delta.d_silence_bias,
-                'weight': delta.weight,
-                'human_detected': delta.human_detected,
-                'petit_detected': delta.petit_detected,
-                'sleep_request': delta.sleep_request,
-            }
-            for delta in self.delta_buffer
-        ]
+        deltas = [{
+            'd_curiosity': delta.d_curiosity,
+            'd_boredom': delta.d_boredom,
+            'd_energy': delta.d_energy,
+            'd_silence_bias': delta.d_silence_bias,
+            'weight': delta.weight,
+            'human_detected': delta.human_detected,
+            'petit_detected': delta.petit_detected,
+            'sleep_request': delta.sleep_request,
+        } for delta in self.delta_buffer]
         self.delta_buffer.clear()
 
         values = {
@@ -101,14 +97,13 @@ class InternalStateNode(Node):
         }
 
         prev_sleeping = self.is_sleeping
-        new_values, self.is_sleeping = internal_state_logic.update_state(
-            values, deltas, self.is_sleeping, base_d_curiosity
-        )
+        new_values, self.is_sleeping = internal_state_logic.update_state(values, deltas, self.is_sleeping,
+                                                                         base_d_curiosity)
 
         if not prev_sleeping and self.is_sleeping:
-            self.get_logger().info("Entering sleep mode")
+            self.get_logger().info('Entering sleep mode')
         elif prev_sleeping and not self.is_sleeping:
-            self.get_logger().info("Waking up")
+            self.get_logger().info('Waking up')
 
         self.state.curiosity = new_values['curiosity']
         self.state.boredom = new_values['boredom']
@@ -124,7 +119,7 @@ class InternalStateNode(Node):
         self.pub.publish(self.state)
 
     # ==================================
-    def load_state(self):
+    def load_state(self) -> None:
         try:
             values = internal_state_logic.load_state_file(self.state_file)
             if values is None:
@@ -140,14 +135,14 @@ class InternalStateNode(Node):
             self.state.petit_detected = False
             self.state.sleep_mode = False
 
-            self.get_logger().info("Anima state restored.")
+            self.get_logger().info('Anima state restored.')
 
         except Exception as e:
-            self.get_logger().warn(f"Failed to load state: {e}")
+            self.get_logger().warn(f'Failed to load state: {e}')
             self.initialize_default_state()
 
     # ==================================
-    def initialize_default_state(self):
+    def initialize_default_state(self) -> None:
         self.state.curiosity = random.uniform(40, 70)
         self.state.boredom = 50.0
         self.state.energy = 80.0
@@ -158,7 +153,7 @@ class InternalStateNode(Node):
         self.state.sleep_mode = False
 
     # ==================================
-    def save_state(self):
+    def save_state(self) -> None:
         data = {
             'curiosity': self.state.curiosity,
             'boredom': self.state.boredom,
@@ -170,15 +165,15 @@ class InternalStateNode(Node):
         try:
             internal_state_logic.save_state_file(self.state_file, data)
         except Exception as e:
-            self.get_logger().error(f"Failed to save state: {e}")
+            self.get_logger().error(f'Failed to save state: {e}')
 
     # ==================================
-    def destroy_node(self):
+    def destroy_node(self) -> None:
         self.save_state()
         super().destroy_node()
 
 
-def main():
+def main() -> None:
     rclpy.init()
     node = InternalStateNode()
     try:

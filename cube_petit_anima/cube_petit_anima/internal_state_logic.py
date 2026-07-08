@@ -1,4 +1,17 @@
-"""internal_state_node の純粋ロジック部分。
+# Copyright (c) 2026 SoftBank Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+"""internal_state_node の純粋ロジック部分.
 
 ROS に依存しない（rclpy / msgs を import しない）ため、
 素の Python 環境で単体テストできる。
@@ -7,6 +20,7 @@ ROS に依存しない（rclpy / msgs を import しない）ため、
 
 import json
 from pathlib import Path
+from typing import Optional, Union
 
 # 状態値のキー（0〜100 にクランプされる連続値）
 STATE_KEYS = ['curiosity', 'boredom', 'energy', 'silence_bias']
@@ -17,14 +31,14 @@ WAKE_ENERGY_THRESHOLD = 60
 
 
 # ==================================
-def clamp(value, low=0.0, high=100.0):
-    """値を [low, high] に収める"""
+def clamp(value: float, low: float = 0.0, high: float = 100.0) -> float:
+    """値を [low, high] に収める."""
     return max(low, min(high, value))
 
 
 # ==================================
-def aggregate_deltas(deltas, base_d_curiosity, base_d_boredom):
-    """デルタ列を集約する。
+def aggregate_deltas(deltas: list, base_d_curiosity: float, base_d_boredom: float) -> dict:
+    """デルタ列を集約する.
 
     deltas: dict のリスト。各 dict は以下のキーを持つ:
         d_curiosity, d_boredom, d_energy, d_silence_bias (float),
@@ -66,8 +80,8 @@ def aggregate_deltas(deltas, base_d_curiosity, base_d_boredom):
 
 
 # ==================================
-def update_sleep_mode(is_sleeping, energy, sleep_request):
-    """スリープヒステリシス（energy<=20 で入眠、>=60 で覚醒）"""
+def update_sleep_mode(is_sleeping: bool, energy: float, sleep_request: bool) -> bool:
+    """スリープヒステリシス（energy<=20 で入眠、>=60 で覚醒）."""
     if not is_sleeping and (energy <= SLEEP_ENERGY_THRESHOLD or sleep_request):
         return True
     elif is_sleeping and energy >= WAKE_ENERGY_THRESHOLD:
@@ -76,8 +90,12 @@ def update_sleep_mode(is_sleeping, energy, sleep_request):
 
 
 # ==================================
-def update_state(values, deltas, is_sleeping, base_d_curiosity, base_d_boredom=0.05):
-    """1ステップ分の状態更新を計算する。
+def update_state(values: dict,
+                 deltas: list,
+                 is_sleeping: bool,
+                 base_d_curiosity: float,
+                 base_d_boredom: float = 0.05) -> tuple:
+    """1ステップ分の状態更新を計算する.
 
     values: STATE_KEYS を持つ dict（現在の状態値）
     deltas: aggregate_deltas() に渡すデルタ dict のリスト
@@ -120,19 +138,19 @@ def update_state(values, deltas, is_sleeping, base_d_curiosity, base_d_boredom=0
 # ==================================
 # 永続化 (JSON)
 # ==================================
-def default_state_file(namespace, home_dir=None):
-    """状態ファイルのデフォルトパス（home_dir 指定でテスト時に差し替え可能）"""
+def default_state_file(namespace: str, home_dir: Union[str, Path, None] = None) -> Path:
+    """状態ファイルのデフォルトパス（home_dir 指定でテスト時に差し替え可能）."""
     base = Path(home_dir) if home_dir is not None else Path.home()
     return base / '.cube_petit' / namespace / 'anima_state.json'
 
 
-def hostname_to_namespace(raw_hostname):
-    """ホスト名 → namespace（'-' を '_' に置換）"""
+def hostname_to_namespace(raw_hostname: str) -> str:
+    """ホスト名 → namespace（'-' を '_' に置換）."""
     return raw_hostname.replace('-', '_')
 
 
-def load_state_file(state_file):
-    """状態ファイルを読み込む。
+def load_state_file(state_file: Union[str, Path]) -> Optional[dict]:
+    """状態ファイルを読み込む.
 
     ファイルが無ければ None を返す。
     破損している場合は例外を送出する（呼び出し側でデフォルト初期化する）。
@@ -153,7 +171,7 @@ def load_state_file(state_file):
     }
 
 
-def save_state_file(state_file, values):
-    """状態値 dict を JSON として書き込む"""
+def save_state_file(state_file: Union[str, Path], values: dict) -> None:
+    """状態値 dict を JSON として書き込む."""
     with open(state_file, 'w') as f:
         json.dump(values, f)
