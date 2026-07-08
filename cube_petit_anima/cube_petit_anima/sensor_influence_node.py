@@ -1,4 +1,3 @@
-import math
 import time
 
 import rclpy
@@ -11,6 +10,8 @@ from cube_petit_scenario_msgs.msg import InternalStateDelta
 from cube_petit_speech_msgs.msg import AudioDataStamped
 from people_msgs.msg import PositionMeasurementArray
 from nav_msgs.msg import Odometry
+
+from cube_petit_anima import sensor_influence_logic
 
 class SensorInfluenceNode(Node):
 
@@ -110,9 +111,9 @@ class SensorInfluenceNode(Node):
         if not audio:
             return
 
-        volume = sum(abs(b) for b in audio[:1000]) / 1000.0
+        volume = sensor_influence_logic.calc_mic_volume(audio)
 
-        if volume > 20:  # 仮閾値
+        if volume > sensor_influence_logic.MIC_VOLUME_THRESHOLD:  # 仮閾値
             self.publish_delta(
                 d_curiosity=0.1,
                 weight=0.6,
@@ -172,11 +173,11 @@ class SensorInfluenceNode(Node):
         pos = msg.pose.pose.position
 
         if self.prev_position is not None:
-            dx = pos.x - self.prev_position.x
-            dy = pos.y - self.prev_position.y
-            dist = math.sqrt(dx * dx + dy * dy)
+            dist = sensor_influence_logic.calc_odom_distance(
+                self.prev_position.x, self.prev_position.y, pos.x, pos.y
+            )
 
-            if dist > 0.01:
+            if dist > sensor_influence_logic.ODOM_MOVE_THRESHOLD:
                 self.publish_delta(
                     d_energy=-0.1,
                     weight=0.8,

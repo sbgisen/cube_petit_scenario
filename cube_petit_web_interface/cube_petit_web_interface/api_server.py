@@ -22,6 +22,13 @@ from fastapi.responses import Response
 from pydantic import BaseModel
 from PIL import Image
 
+try:
+    # uvicorn cube_petit_web_interface.api_server:app で起動した場合
+    from cube_petit_web_interface import helpers as _helpers
+except ImportError:
+    # python api_server.py で直接実行した場合
+    import helpers as _helpers
+
 ROS_ENV = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp'}
 
 MAP_BASE_DIR = Path('/home/cube-petit/ros/src/cube_petit_ros/cube_petit_navigation/map')
@@ -363,8 +370,7 @@ async def add_context(namespace: str = 'cube_petit_orange', body: ContextRequest
 # --- 音量制御 ---
 
 def _parse_amixer_volume(output: str) -> int:
-    m = re.search(r'\[(\d+)%\]', output)
-    return int(m.group(1)) if m else -1
+    return _helpers._parse_amixer_volume(output)
 
 
 @app.get('/audio/volume')
@@ -417,15 +423,11 @@ async def load_map(namespace: str, map_name: str):
 # --- ポイント (places.yaml) ---
 
 def _load_places() -> dict:
-    if PLACES_FILE.exists():
-        with PLACES_FILE.open() as f:
-            return yaml.safe_load(f) or {}
-    return {}
+    return _helpers._load_places(PLACES_FILE)
 
 
 def _save_places(data: dict) -> None:
-    with PLACES_FILE.open('w') as f:
-        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+    _helpers._save_places(PLACES_FILE, data)
 
 
 def _get_robot_pose(namespace: str) -> Optional[list[float]]:
@@ -502,11 +504,7 @@ PROTECTED_HISTORY = {'history.jsonl'}
 
 
 def _active_prompt_name() -> str:
-    if ACTIVE_MARKER.exists():
-        name = ACTIVE_MARKER.read_text(encoding='utf-8').strip()
-        if (PROMPT_DIR / name).exists():
-            return name
-    return PROMPT_FILE.name
+    return _helpers._active_prompt_name(PROMPT_DIR, ACTIVE_MARKER, PROMPT_FILE.name)
 
 
 @app.get('/prompt/list')
@@ -623,24 +621,15 @@ async def delete_history(file: str):
 # --- マップ別 places.yaml ---
 
 def _map_places_path(map_name: str) -> Optional[Path]:
-    d = _find_map_dir(map_name)
-    return d / 'places.yaml' if d else None
+    return _helpers._map_places_path(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _load_map_places(map_name: str) -> list:
-    p = _map_places_path(map_name)
-    if p and p.exists():
-        data = yaml.safe_load(p.read_text(encoding='utf-8')) or {}
-        return data.get('places', [])
-    return []
+    return _helpers._load_map_places(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _save_map_places(map_name: str, places: list) -> None:
-    p = _map_places_path(map_name)
-    if p is None:
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.dump({'places': places}, allow_unicode=True, sort_keys=False), encoding='utf-8')
+    _helpers._save_map_places(map_name, places, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 @app.get('/map/places')
@@ -711,31 +700,19 @@ async def add_place_manual(body: PlaceManualBody):
 
 
 def _find_map_dir(map_name: str) -> Optional[Path]:
-    for base in [MAP_BASE_DIR, MAP_EXTRA_DIR]:
-        d = base / map_name
-        if d.is_dir():
-            return d
-    return None
+    return _helpers._find_map_dir(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _pgm_to_png_bytes(pgm_path: Path) -> bytes:
-    img = Image.open(pgm_path).convert('L')
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
+    return _helpers._pgm_to_png_bytes(pgm_path)
 
 
 def _png_bytes_to_pgm(png_data: bytes, pgm_path: Path) -> None:
-    img = Image.open(io.BytesIO(png_data)).convert('L')
-    img.save(str(pgm_path), format='PPM')
-    # PPM → PGM: rewrite header
-    pgm_path.write_bytes(_pil_to_pgm_bytes(img))
+    _helpers._png_bytes_to_pgm(png_data, pgm_path)
 
 
 def _pil_to_pgm_bytes(img: Image.Image) -> bytes:
-    w, h = img.size
-    header = f'P5\n{w} {h}\n255\n'.encode()
-    return header + img.tobytes()
+    return _helpers._pil_to_pgm_bytes(img)
 
 
 @app.get('/map/image')
@@ -899,24 +876,15 @@ async def rotate_map(body: RotateBody):
 # --- マップ別 rooms.yaml ---
 
 def _map_rooms_path(map_name: str) -> Optional[Path]:
-    d = _find_map_dir(map_name)
-    return d / 'rooms.yaml' if d else None
+    return _helpers._map_rooms_path(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _load_map_rooms(map_name: str) -> list:
-    p = _map_rooms_path(map_name)
-    if p and p.exists():
-        data = yaml.safe_load(p.read_text(encoding='utf-8')) or {}
-        return data.get('rooms', [])
-    return []
+    return _helpers._load_map_rooms(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _save_map_rooms(map_name: str, rooms: list) -> None:
-    p = _map_rooms_path(map_name)
-    if p is None:
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.dump({'rooms': rooms}, allow_unicode=True, sort_keys=False), encoding='utf-8')
+    _helpers._save_map_rooms(map_name, rooms, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 @app.get('/map/rooms')

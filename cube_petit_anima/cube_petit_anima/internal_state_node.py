@@ -3,10 +3,10 @@ from rclpy.node import Node
 from cube_petit_scenario_msgs.msg import InternalState
 
 import random
-import json
-from pathlib import Path
 import socket
 from cube_petit_scenario_msgs.msg import InternalStateDelta
+
+from cube_petit_anima import internal_state_logic
 
 
 
@@ -32,11 +32,10 @@ class InternalStateNode(Node):
 
         # Hostname → namespace
         raw_hostname = socket.gethostname()
-        self.namespace = raw_hostname.replace('-', '_')
+        self.namespace = internal_state_logic.hostname_to_namespace(raw_hostname)
 
-        base_dir = Path.home() / '.cube_petit' / self.namespace
-        base_dir.mkdir(parents=True, exist_ok=True)
-        self.state_file = base_dir / 'anima_state.json'
+        self.state_file = internal_state_logic.default_state_file(self.namespace)
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
 
         self.state = InternalState()
         self.load_state()
@@ -77,61 +76,47 @@ class InternalStateNode(Node):
 
         # --- Base drift ---
         base_d_curiosity = random.uniform(-0.05, 0.05)
-        base_d_boredom = 0.05
 
-        # --- Aggregate deltas ---
-        d_curiosity = base_d_curiosity
-        d_boredom = base_d_boredom
-        d_energy = 0.0
-        d_silence = 0.0
-
-        human_detected = False
-        petit_detected = False
-        sleep_request = False
-
-        for delta in self.delta_buffer:
-            w = max(0.0, min(1.0, delta.weight))
-
-            d_curiosity += delta.d_curiosity * w
-            d_boredom += delta.d_boredom * w
-            d_energy += delta.d_energy * w
-            d_silence += delta.d_silence_bias * w
-
-            human_detected = human_detected or delta.human_detected
-            petit_detected = petit_detected or delta.petit_detected
-            sleep_request = sleep_request or delta.sleep_request
-
+        # msg → plain dict へ変換（計算は internal_state_logic に委譲）
+        deltas = [
+            {
+                'd_curiosity': delta.d_curiosity,
+                'd_boredom': delta.d_boredom,
+                'd_energy': delta.d_energy,
+                'd_silence_bias': delta.d_silence_bias,
+                'weight': delta.weight,
+                'human_detected': delta.human_detected,
+                'petit_detected': delta.petit_detected,
+                'sleep_request': delta.sleep_request,
+            }
+            for delta in self.delta_buffer
+        ]
         self.delta_buffer.clear()
 
-        # --- Apply deltas ---
-        self.state.curiosity += d_curiosity
-        self.state.boredom += d_boredom
-        self.state.energy += d_energy
-        self.state.silence_bias += d_silence
+        values = {
+            'curiosity': self.state.curiosity,
+            'boredom': self.state.boredom,
+            'energy': self.state.energy,
+            'silence_bias': self.state.silence_bias,
+        }
 
-        self.state.human_detected = human_detected
-        self.state.petit_detected = petit_detected
+        prev_sleeping = self.is_sleeping
+        new_values, self.is_sleeping = internal_state_logic.update_state(
+            values, deltas, self.is_sleeping, base_d_curiosity
+        )
 
-        # ==================================
-        # Sleep hysteresis
-        # ==================================
-        if not self.is_sleeping and (self.state.energy <= 20 or sleep_request):
-            self.is_sleeping = True
+        if not prev_sleeping and self.is_sleeping:
             self.get_logger().info("Entering sleep mode")
-
-        elif self.is_sleeping and self.state.energy >= 60:
-            self.is_sleeping = False
+        elif prev_sleeping and not self.is_sleeping:
             self.get_logger().info("Waking up")
 
-        # Energy auto behavior
-        if self.is_sleeping:
-            self.state.energy += 0.4
-            self.state.boredom -= 0.2
-        else:
-            self.state.energy -= 0.05
+        self.state.curiosity = new_values['curiosity']
+        self.state.boredom = new_values['boredom']
+        self.state.energy = new_values['energy']
+        self.state.silence_bias = new_values['silence_bias']
 
-        # Clamp
-        self.clamp()
+        self.state.human_detected = new_values['human_detected']
+        self.state.petit_detected = new_values['petit_detected']
 
         # Reflect sleep mode into state
         self.state.sleep_mode = self.is_sleeping
@@ -139,33 +124,26 @@ class InternalStateNode(Node):
         self.pub.publish(self.state)
 
     # ==================================
-    def clamp(self):
-        for attr in ['curiosity', 'boredom', 'energy', 'silence_bias']:
-            val = getattr(self.state, attr)
-            setattr(self.state, attr, max(0.0, min(100.0, val)))
-
-    # ==================================
     def load_state(self):
-        if self.state_file.exists():
-            try:
-                with open(self.state_file, 'r') as f:
-                    data = json.load(f)
-
-                self.state.curiosity = data.get('curiosity', 60.0)
-                self.state.boredom = data.get('boredom', 40.0)
-                self.state.energy = data.get('energy', 80.0)
-                self.state.silence_bias = data.get('silence_bias', 70.0)
-                self.state.body_generation = data.get('body_generation', 1)
-                self.state.human_detected = False
-                self.state.petit_detected = False
-                self.state.sleep_mode = False
-
-                self.get_logger().info("Anima state restored.")
-
-            except Exception as e:
-                self.get_logger().warn(f"Failed to load state: {e}")
+        try:
+            values = internal_state_logic.load_state_file(self.state_file)
+            if values is None:
                 self.initialize_default_state()
-        else:
+                return
+
+            self.state.curiosity = values['curiosity']
+            self.state.boredom = values['boredom']
+            self.state.energy = values['energy']
+            self.state.silence_bias = values['silence_bias']
+            self.state.body_generation = values['body_generation']
+            self.state.human_detected = False
+            self.state.petit_detected = False
+            self.state.sleep_mode = False
+
+            self.get_logger().info("Anima state restored.")
+
+        except Exception as e:
+            self.get_logger().warn(f"Failed to load state: {e}")
             self.initialize_default_state()
 
     # ==================================
@@ -190,8 +168,7 @@ class InternalStateNode(Node):
         }
 
         try:
-            with open(self.state_file, 'w') as f:
-                json.dump(data, f)
+            internal_state_logic.save_state_file(self.state_file, data)
         except Exception as e:
             self.get_logger().error(f"Failed to save state: {e}")
 

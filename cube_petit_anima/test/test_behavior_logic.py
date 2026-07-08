@@ -1,0 +1,43 @@
+"""behavior_logic のテスト"""
+
+import math
+
+import pytest
+
+from cube_petit_anima import behavior_logic as logic
+
+
+class TestComputeSwing:
+
+    def test_phase_advances_by_dt_times_speed(self):
+        new_phase, _ = logic.compute_swing(0.0)
+        assert new_phase == pytest.approx(0.1 * 1.2)
+
+    def test_value_is_amplitude_times_sin(self):
+        phase = 1.0
+        new_phase, value = logic.compute_swing(phase)
+        assert value == pytest.approx(1.5 * math.sin(new_phase))
+
+    def test_value_within_limit(self):
+        # 位相を進めていっても指令値は ±1.5 を超えない
+        phase = 0.0
+        for _ in range(200):
+            phase, value = logic.compute_swing(phase)
+            assert -1.5 <= value <= 1.5
+
+    def test_clamp_when_amplitude_exceeds_limit(self):
+        # sin がほぼ 1 になる位相で振幅を大きくするとクランプされる
+        phase = math.pi / 2 - 0.1 * 1.2  # 進めた後に pi/2 になる
+        _, value = logic.compute_swing(phase, amplitude=3.0)
+        assert value == pytest.approx(1.5)
+
+    def test_clamp_negative_side(self):
+        phase = -math.pi / 2 - 0.1 * 1.2
+        _, value = logic.compute_swing(phase, amplitude=3.0)
+        assert value == pytest.approx(-1.5)
+
+    def test_defaults_match_original_parameters(self):
+        assert logic.SWING_AMPLITUDE == pytest.approx(1.5)
+        assert logic.SWING_SPEED == pytest.approx(1.2)
+        assert logic.SWING_DT == pytest.approx(0.1)
+        assert logic.ANGULAR_Z_LIMIT == pytest.approx(1.5)

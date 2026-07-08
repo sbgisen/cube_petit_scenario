@@ -4,10 +4,10 @@ from cube_petit_scenario_msgs.msg import InternalState
 from geometry_msgs.msg import TwistStamped
 
 import random
-import math
 import time
 from rclpy.action import ActionClient
 from cube_petit_speech_msgs.action import Speech
+from cube_petit_anima import behavior_logic
 from cube_petit_anima.utils.sound_effect_play import SEPlayer
 
 class BehaviorNode(Node):
@@ -110,14 +110,9 @@ class BehaviorNode(Node):
         msg.header.frame_id = "base_link"
 
         if self.swing_active:
-
-            amplitude = 1.5
-            speed = 1.2
-
-            self.swing_phase += 0.1 * speed
-
-            value = amplitude * math.sin(self.swing_phase)
-            msg.twist.angular.z = max(-1.5, min(1.5, value))
+            self.swing_phase, msg.twist.angular.z = behavior_logic.compute_swing(
+                self.swing_phase
+            )
         else:
             msg.twist.angular.z = 0.0
 
