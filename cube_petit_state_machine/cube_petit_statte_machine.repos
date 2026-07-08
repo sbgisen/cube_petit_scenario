@@ -1,5 +1,5 @@
 repositories:
     cube_petit_ros:
         type: git
-        uri: git@github.com:sbgisen/cube_petit_ros.git
-        version: feature/jazzy-devel
+        url: https://github.com/sbgisen/cube_petit_ros.git
+        version: jazzy-devel

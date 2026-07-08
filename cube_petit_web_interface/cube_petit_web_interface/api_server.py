@@ -1,26 +1,47 @@
+# Copyright (c) 2026 SoftBank Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
+
 import asyncio
 import base64
+from contextlib import asynccontextmanager
 import io
 import math
 import os
+from pathlib import Path
 import re
 import shutil
 import signal
-import struct
 import subprocess
 import threading
-from contextlib import asynccontextmanager
-from pathlib import Path
-from typing import Optional
+from typing import AsyncIterator, Callable, Optional
 
-import rclpy
-import yaml
-from rclpy.node import Node
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI
+from fastapi import HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import Response
-from pydantic import BaseModel
 from PIL import Image
+from pydantic import BaseModel
+import rclpy
+from rclpy.node import Node
+import yaml
+
+try:
+    # uvicorn cube_petit_web_interface.api_server:app で起動した場合
+    from cube_petit_web_interface import helpers as _helpers
+except ImportError:
+    # python api_server.py で直接実行した場合
+    import helpers as _helpers
 
 ROS_ENV = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp'}
 
@@ -33,24 +54,32 @@ PROMPT_FILE = Path('/home/cube-petit/ros/src/cube_petit_interaction/cube_petit_c
 WATCHED_NAMESPACES = ['cube_petit_orange']
 _status_cache: dict[str, dict] = {ns: {'is_active': False, 'can_receive_message': False} for ns in WATCHED_NAMESPACES}
 _node: Optional[Node] = None
+_tf_buffer = None
+_tf_listener = None
 
 
-def _start_ros():
-    global _node
+def _start_ros() -> None:
+    global _node, _tf_buffer, _tf_listener
     from cube_petit_chat_msgs.msg import RealtimeState
-    from tf2_ros import Buffer, TransformListener
+    from tf2_ros import Buffer
+    from tf2_ros import TransformListener
     rclpy.init()
     _node = Node('web_interface_watcher')
-    _node._tf_buffer = Buffer()
-    _node._tf_listener = TransformListener(_node._tf_buffer, _node)
+    _tf_buffer = Buffer()
+    _tf_listener = TransformListener(_tf_buffer, _node)
     for ns in WATCHED_NAMESPACES:
-        def make_cb(n):
-            def cb(msg):
+
+        def make_cb(n: str) -> Callable:
+
+            def cb(msg: RealtimeState) -> None:
                 _status_cache[n]['is_active'] = msg.is_active
                 _status_cache[n]['can_receive_message'] = msg.can_receive_message
+
             return cb
+
         _node.create_subscription(RealtimeState, f'/{ns}/realtime_conversation_status', make_cb(ns), 10)
     rclpy.spin(_node)
+
 
 _ros_thread = threading.Thread(target=_start_ros, daemon=True)
 _ros_thread.start()
@@ -59,36 +88,36 @@ _can_prev_rx: int = -1
 _can_stale: bool = False
 
 processes: dict[str, Optional[subprocess.Popen]] = {
-    'rosbridge':  None,
-    'bringup':    None,
-    'demo':       None,
-    'anima':      None,
+    'rosbridge': None,
+    'bringup': None,
+    'demo': None,
+    'anima': None,
     'create_map': None,
     'navigation': None,
 }
 
 LAUNCH_COMMANDS = {
-    'rosbridge':  ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml'],
-    'bringup':    ['ros2', 'launch', 'cube_petit_bringup',    'cube_petit_bringup.launch.py'],
-    'demo':       ['ros2', 'launch', 'cube_petit_scenario',   'cube_petit_talk_demo.launch.py'],
-    'anima':      ['ros2', 'launch', 'cube_petit_anima',      'anima.launch.py'],
+    'rosbridge': ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml'],
+    'bringup': ['ros2', 'launch', 'cube_petit_bringup', 'cube_petit_bringup.launch.py'],
+    'demo': ['ros2', 'launch', 'cube_petit_scenario', 'cube_petit_talk_demo.launch.py'],
+    'anima': ['ros2', 'launch', 'cube_petit_anima', 'anima.launch.py'],
     'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map_orange.launch.py'],
     'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation_orange.launch.py'],
 }
 
 # 各launchが起動中かを判定するノード名（部分一致）
 LAUNCH_NODE_MARKERS = {
-    'rosbridge':  'rosbridge_websocket',
-    'bringup':    'robot_state_publisher',
-    'demo':       'realtime_gpt_chat',
-    'anima':      'behavior_node',
+    'rosbridge': 'rosbridge_websocket',
+    'bringup': 'robot_state_publisher',
+    'demo': 'realtime_gpt_chat',
+    'anima': 'behavior_node',
     'create_map': 'slam_toolbox',
     'navigation': 'emcl',
 }
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     yield
     for proc in processes.values():
         if proc and proc.poll() is None:
@@ -121,14 +150,18 @@ class PromptBody(BaseModel):
 
 
 @app.post('/launch/{target}/start', response_model=LaunchResponse)
-async def start_launch(target: str, map: Optional[str] = None, keepout: Optional[str] = None):
+async def start_launch(
+        target: str,
+        map: Optional[str] = None,  # noqa: A002
+        keepout: Optional[str] = None) -> LaunchResponse:
     if target not in LAUNCH_COMMANDS:
         return LaunchResponse(ok=False, message=f'Unknown target: {target}')
     if processes[target] and processes[target].poll() is None:
         return LaunchResponse(ok=False, message=f'{target} is already running')
     if target in ('bringup', 'rosbridge'):
         subprocess.run(['fuser', '-k', '9090/tcp'], capture_output=True)
-        import time; time.sleep(0.5)
+        import time
+        time.sleep(0.5)
     cmd = list(LAUNCH_COMMANDS[target])
     log_msg = ' '.join(cmd)
     if target == 'navigation':
@@ -147,7 +180,7 @@ async def start_launch(target: str, map: Optional[str] = None, keepout: Optional
 
 
 def _kill_by_launch_file(launch_file: str) -> bool:
-    """ランチファイル名でプロセスを探してプロセスグループごと停止する"""
+    """ランチファイル名でプロセスを探してプロセスグループごと停止する."""
     result = subprocess.run(['pgrep', '-f', launch_file], capture_output=True, text=True)
     killed = False
     for pid_str in result.stdout.strip().split():
@@ -160,7 +193,7 @@ def _kill_by_launch_file(launch_file: str) -> bool:
 
 
 @app.post('/launch/{target}/stop', response_model=LaunchResponse)
-async def stop_launch(target: str):
+async def stop_launch(target: str) -> LaunchResponse:
     if target not in processes:
         return LaunchResponse(ok=False, message=f'Unknown target: {target}')
 
@@ -188,7 +221,7 @@ async def stop_launch(target: str):
 
 
 @app.get('/action/exists')
-async def action_exists(name: str):
+async def action_exists(name: str) -> dict:
     try:
         result = subprocess.run(['ros2', 'action', 'list'], capture_output=True, text=True, timeout=3)
         found = any(name in line for line in result.stdout.splitlines())
@@ -198,7 +231,7 @@ async def action_exists(name: str):
 
 
 @app.get('/system/devices')
-async def get_system_devices():
+async def get_system_devices() -> dict:
     import os as _os
     result: dict = {}
 
@@ -219,38 +252,38 @@ async def get_system_devices():
             m = re.search(r'RX:.*?\n\s+(\d+)\s+(\d+)\s+(\d+)', r.stdout)
             if m:
                 rx_packets = int(m.group(2))
-                rx_errors  = int(m.group(3))
+                rx_errors = int(m.group(3))
                 if _can_prev_rx < 0:
                     _can_stale = False
                 else:
                     _can_stale = (rx_packets == _can_prev_rx)
                 _can_prev_rx = rx_packets
-                result['can_rx']     = rx_packets
+                result['can_rx'] = rx_packets
                 result['can_errors'] = rx_errors
-                result['can_stale']  = _can_stale
+                result['can_stale'] = _can_stale
     except Exception:
         result['can0'] = False
 
     # シリアルデバイス（udevシンボリックリンク）
-    result['lidar']    = _os.path.exists('/dev/ttyLD06-19')
-    result['imu']      = _os.path.exists('/dev/ttyWitMotion')
-    result['canable']  = _os.path.exists('/dev/ttyCANable')
+    result['lidar'] = _os.path.exists('/dev/ttyLD06-19')
+    result['imu'] = _os.path.exists('/dev/ttyWitMotion')
+    result['canable'] = _os.path.exists('/dev/ttyCANable')
 
     # USB接続（lsusb）
     try:
         r = subprocess.run(['lsusb'], capture_output=True, text=True, timeout=5)
         lines = r.stdout.splitlines()
-        result['realsense'] = any('8086:0b' in l or 'RealSense' in l for l in lines)
-        result['oak']       = any('03e7:' in l or 'Movidius' in l or 'Myriad' in l for l in lines)
+        result['realsense'] = any('8086:0b' in line or 'RealSense' in line for line in lines)
+        result['oak'] = any('03e7:' in line or 'Movidius' in line or 'Myriad' in line for line in lines)
     except Exception:
         result['realsense'] = False
-        result['oak']       = False
+        result['oak'] = False
 
     return result
 
 
 @app.post('/launch/kill_all')
-async def kill_all_ros():
+async def kill_all_ros() -> dict:
     subprocess.run(['pkill', 'ros'], capture_output=True)
     subprocess.run(['pkill', 'ros2'], capture_output=True)
     for k in processes:
@@ -259,7 +292,7 @@ async def kill_all_ros():
 
 
 @app.get('/ros/nodes')
-async def get_ros_nodes():
+async def get_ros_nodes() -> dict:
     try:
         result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=5, env=ROS_ENV)
         nodes = [n.strip() for n in result.stdout.splitlines() if n.strip()]
@@ -269,7 +302,7 @@ async def get_ros_nodes():
 
 
 @app.get('/launch/status')
-async def get_status():
+async def get_status() -> dict:
     try:
         result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=5, env=ROS_ENV)
         node_output = result.stdout
@@ -284,13 +317,19 @@ async def get_status():
 
 # --- 会話ステータス ---
 
+
 @app.get('/ros/conversation/status')
-async def get_conversation_status(namespace: str = 'cube_petit_orange'):
+async def get_conversation_status(namespace: str = 'cube_petit_orange') -> dict:
     try:
         subprocess.run(
-            ['ros2', 'service', 'call', f'/{namespace}/get_realtime_conversation_status',
-             'std_srvs/srv/Trigger', '{}'],
-            capture_output=True, text=True, timeout=3, env=ROS_ENV,
+            [
+                'ros2', 'service', 'call', f'/{namespace}/get_realtime_conversation_status', 'std_srvs/srv/Trigger',
+                '{}'
+            ],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            env=ROS_ENV,
         )
         await asyncio.sleep(0.3)
     except Exception:
@@ -299,13 +338,18 @@ async def get_conversation_status(namespace: str = 'cube_petit_orange'):
 
 
 @app.post('/ros/conversation/enable')
-async def enable_conversation(namespace: str = 'cube_petit_orange', enable: bool = True):
+async def enable_conversation(namespace: str = 'cube_petit_orange', enable: bool = True) -> dict:
     try:
         val = 'True' if enable else 'False'
         result = subprocess.run(
-            ['ros2', 'service', 'call', f'/{namespace}/enable_realtime_conversation',
-             'std_srvs/srv/SetBool', f'{{data: {val}}}'],
-            capture_output=True, text=True, timeout=5, env=ROS_ENV,
+            [
+                'ros2', 'service', 'call', f'/{namespace}/enable_realtime_conversation', 'std_srvs/srv/SetBool',
+                f'{{data: {val}}}'
+            ],
+            capture_output=True,
+            text=True,
+            timeout=5,
+            env=ROS_ENV,
         )
         return {'ok': 'success: True' in result.stdout or result.returncode == 0}
     except Exception as e:
@@ -314,6 +358,7 @@ async def enable_conversation(namespace: str = 'cube_petit_orange', enable: bool
 
 def _call_add_context_sync(namespace: str, req_body: ContextRequest) -> bool:
     from cube_petit_chat_msgs.srv import AddContext
+    from rclpy.task import Future
     from sensor_msgs.msg import Image as SensorImage
 
     if _node is None:
@@ -338,7 +383,7 @@ def _call_add_context_sync(namespace: str, req_body: ContextRequest) -> bool:
     event = threading.Event()
     result = [None]
 
-    def done_cb(future):
+    def done_cb(future: Future) -> None:
         try:
             result[0] = future.result()
         except Exception:
@@ -352,7 +397,7 @@ def _call_add_context_sync(namespace: str, req_body: ContextRequest) -> bool:
 
 
 @app.post('/ros/conversation/context')
-async def add_context(namespace: str = 'cube_petit_orange', body: ContextRequest = ContextRequest()):
+async def add_context(namespace: str = 'cube_petit_orange', body: ContextRequest = ContextRequest()) -> dict:
     try:
         ok = await asyncio.get_event_loop().run_in_executor(None, _call_add_context_sync, namespace, body)
         return {'ok': ok}
@@ -362,13 +407,13 @@ async def add_context(namespace: str = 'cube_petit_orange', body: ContextRequest
 
 # --- 音量制御 ---
 
+
 def _parse_amixer_volume(output: str) -> int:
-    m = re.search(r'\[(\d+)%\]', output)
-    return int(m.group(1)) if m else -1
+    return _helpers.parse_amixer_volume(output)
 
 
 @app.get('/audio/volume')
-async def get_audio_volume():
+async def get_audio_volume() -> dict:
     try:
         r_speaker = subprocess.run(['amixer', 'sget', 'Master'], capture_output=True, text=True)
         r_mic = subprocess.run(['amixer', 'sget', 'Capture'], capture_output=True, text=True)
@@ -378,7 +423,7 @@ async def get_audio_volume():
 
 
 @app.post('/audio/volume')
-async def set_audio_volume(type: str, value: int):
+async def set_audio_volume(type: str, value: int) -> dict:  # noqa: A002
     control = 'Master' if type == 'speaker' else 'Capture'
     try:
         subprocess.run(['amixer', 'sset', control, f'{value}%'], capture_output=True)
@@ -389,25 +434,29 @@ async def set_audio_volume(type: str, value: int):
 
 # --- マップ ---
 
+
 @app.get('/map/list')
-async def list_maps():
+async def list_maps() -> dict:
     dirs = [MAP_BASE_DIR, MAP_EXTRA_DIR]
     names = sorted({d.name for base in dirs if base.exists() for d in base.iterdir() if d.is_dir()})
     return {'maps': names}
 
 
 @app.post('/map/load')
-async def load_map(namespace: str, map_name: str):
+async def load_map(namespace: str, map_name: str) -> dict:
     yaml_path = MAP_BASE_DIR / map_name / f'{map_name}.yaml'
     if not yaml_path.exists():
         return {'ok': False, 'error': f'Map file not found: {yaml_path}'}
     try:
         result = subprocess.run(
-            ['ros2', 'service', 'call',
-             f'/{namespace}/navigation/map_server/load_map',
-             'nav2_msgs/srv/LoadMap',
-             f"{{map_url: 'file://{yaml_path}'}}"],
-            capture_output=True, text=True, timeout=10, env=ROS_ENV,
+            [
+                'ros2', 'service', 'call', f'/{namespace}/navigation/map_server/load_map', 'nav2_msgs/srv/LoadMap',
+                f"{{map_url: 'file://{yaml_path}'}}"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=ROS_ENV,
         )
         return {'ok': 'result: 0' in result.stdout or result.returncode == 0}
     except Exception as e:
@@ -416,23 +465,20 @@ async def load_map(namespace: str, map_name: str):
 
 # --- ポイント (places.yaml) ---
 
+
 def _load_places() -> dict:
-    if PLACES_FILE.exists():
-        with PLACES_FILE.open() as f:
-            return yaml.safe_load(f) or {}
-    return {}
+    return _helpers.load_places(PLACES_FILE)
 
 
 def _save_places(data: dict) -> None:
-    with PLACES_FILE.open('w') as f:
-        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+    _helpers.save_places(PLACES_FILE, data)
 
 
 def _get_robot_pose(namespace: str) -> Optional[list[float]]:
     if _node is None:
         return None
     try:
-        t = _node._tf_buffer.lookup_transform('map', f'{namespace}/base_link', rclpy.time.Time())
+        t = _tf_buffer.lookup_transform('map', f'{namespace}/base_link', rclpy.time.Time())
         x = t.transform.translation.x
         y = t.transform.translation.y
         q = t.transform.rotation
@@ -443,7 +489,7 @@ def _get_robot_pose(namespace: str) -> Optional[list[float]]:
 
 
 @app.get('/ros/robot_pose')
-async def get_robot_pose_endpoint(namespace: str = 'cube_petit_orange'):
+async def get_robot_pose_endpoint(namespace: str = 'cube_petit_orange') -> dict:
     pose = _get_robot_pose(namespace)
     if pose is None:
         return {'ok': False}
@@ -451,7 +497,7 @@ async def get_robot_pose_endpoint(namespace: str = 'cube_petit_orange'):
 
 
 @app.get('/places')
-async def get_places():
+async def get_places() -> dict:
     data = _load_places()
     result = []
     for category, section in data.items():
@@ -463,7 +509,7 @@ async def get_places():
 
 
 @app.post('/places/add')
-async def add_place(namespace: str, name: str, category: str = 'patrol'):
+async def add_place(namespace: str, name: str, category: str = 'patrol') -> dict:
     pose = _get_robot_pose(namespace)
     if pose is None:
         return {'ok': False, 'error': 'Cannot get robot position from TF'}
@@ -479,7 +525,7 @@ async def add_place(namespace: str, name: str, category: str = 'patrol'):
 
 
 @app.delete('/places/remove')
-async def remove_place(category: str, name: str):
+async def remove_place(category: str, name: str) -> dict:
     data = _load_places()
     section = data.get(category, {})
     if name in section.get('places', {}):
@@ -502,28 +548,24 @@ PROTECTED_HISTORY = {'history.jsonl'}
 
 
 def _active_prompt_name() -> str:
-    if ACTIVE_MARKER.exists():
-        name = ACTIVE_MARKER.read_text(encoding='utf-8').strip()
-        if (PROMPT_DIR / name).exists():
-            return name
-    return PROMPT_FILE.name
+    return _helpers.active_prompt_name(PROMPT_DIR, ACTIVE_MARKER, PROMPT_FILE.name)
 
 
 @app.get('/prompt/list')
-async def list_prompts():
+async def list_prompts() -> dict:
     files = sorted(p.name for p in PROMPT_DIR.glob('*.txt'))
     return {'files': files, 'active': _active_prompt_name()}
 
 
 @app.get('/prompt')
-async def get_prompt(file: Optional[str] = None):
+async def get_prompt(file: Optional[str] = None) -> dict:
     path = PROMPT_DIR / file if file else PROMPT_FILE
     content = path.read_text(encoding='utf-8') if path.exists() else ''
     return {'content': content, 'file': path.name}
 
 
 @app.post('/prompt')
-async def set_prompt(body: PromptBody, file: Optional[str] = None):
+async def set_prompt(body: PromptBody, file: Optional[str] = None) -> dict:
     name = file or PROMPT_FILE.name
     if name in PROTECTED_PROMPTS:
         return {'ok': False, 'error': 'Protected file'}
@@ -533,20 +575,23 @@ async def set_prompt(body: PromptBody, file: Optional[str] = None):
 
 
 @app.post('/prompt/activate')
-async def activate_prompt(file: str, namespace: str = 'cube_petit_orange'):
+async def activate_prompt(file: str, namespace: str = 'cube_petit_orange') -> dict:
     src = PROMPT_DIR / file
     if not src.exists():
         return {'ok': False, 'error': 'File not found'}
     ACTIVE_MARKER.write_text(file, encoding='utf-8')
     subprocess.run(
-        ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'setting_file', str(src)],
-        capture_output=True, timeout=5, env=ROS_ENV,
+        ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'setting_file',
+         str(src)],
+        capture_output=True,
+        timeout=5,
+        env=ROS_ENV,
     )
     return {'ok': True}
 
 
 @app.post('/prompt/new')
-async def new_prompt(name: str):
+async def new_prompt(name: str) -> dict:
     if not name.endswith('.txt'):
         name += '.txt'
     path = PROMPT_DIR / name
@@ -557,7 +602,7 @@ async def new_prompt(name: str):
 
 
 @app.delete('/prompt')
-async def delete_prompt(file: str):
+async def delete_prompt(file: str) -> dict:
     if file in PROTECTED_PROMPTS:
         return {'ok': False, 'error': 'Protected file'}
     path = PROMPT_DIR / file
@@ -569,7 +614,7 @@ async def delete_prompt(file: str):
 
 
 @app.get('/history/list')
-async def list_history():
+async def list_history() -> dict:
     HISTORY_DIR.mkdir(parents=True, exist_ok=True)
     files = sorted(p.name for p in HISTORY_DIR.glob('*.jsonl'))
     active = ''
@@ -583,21 +628,24 @@ async def list_history():
 
 
 @app.post('/history/activate')
-async def activate_history(file: str, namespace: str = 'cube_petit_orange'):
+async def activate_history(file: str, namespace: str = 'cube_petit_orange') -> dict:
     path = HISTORY_DIR / file
     if not path.exists():
         HISTORY_DIR.mkdir(parents=True, exist_ok=True)
         path.touch()
     HISTORY_ACTIVE_MARKER.write_text(file, encoding='utf-8')
     subprocess.run(
-        ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'history_file', str(path)],
-        capture_output=True, timeout=5, env=ROS_ENV,
+        ['ros2', 'param', 'set', f'/{namespace}/realtime_gpt_chat', 'history_file',
+         str(path)],
+        capture_output=True,
+        timeout=5,
+        env=ROS_ENV,
     )
     return {'ok': True}
 
 
 @app.post('/history/new')
-async def new_history(name: str):
+async def new_history(name: str) -> dict:
     if not name.endswith('.jsonl'):
         name += '.jsonl'
     path = HISTORY_DIR / name
@@ -609,7 +657,7 @@ async def new_history(name: str):
 
 
 @app.delete('/history')
-async def delete_history(file: str):
+async def delete_history(file: str) -> dict:
     if file in PROTECTED_HISTORY:
         return {'ok': False, 'error': 'Protected file'}
     path = HISTORY_DIR / file
@@ -622,29 +670,21 @@ async def delete_history(file: str):
 
 # --- マップ別 places.yaml ---
 
+
 def _map_places_path(map_name: str) -> Optional[Path]:
-    d = _find_map_dir(map_name)
-    return d / 'places.yaml' if d else None
+    return _helpers.map_places_path(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _load_map_places(map_name: str) -> list:
-    p = _map_places_path(map_name)
-    if p and p.exists():
-        data = yaml.safe_load(p.read_text(encoding='utf-8')) or {}
-        return data.get('places', [])
-    return []
+    return _helpers.load_map_places(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _save_map_places(map_name: str, places: list) -> None:
-    p = _map_places_path(map_name)
-    if p is None:
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.dump({'places': places}, allow_unicode=True, sort_keys=False), encoding='utf-8')
+    _helpers.save_map_places(map_name, places, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 @app.get('/map/places')
-async def get_map_places(map_name: str):
+async def get_map_places(map_name: str) -> dict:
     return {'places': _load_map_places(map_name)}
 
 
@@ -658,18 +698,23 @@ class MapPlaceBody(BaseModel):
 
 
 @app.post('/map/places/add')
-async def add_map_place(body: MapPlaceBody):
+async def add_map_place(body: MapPlaceBody) -> dict:
     places = _load_map_places(body.map_name)
     places = [p for p in places if p.get('name') != body.name]
-    places.append({'name': body.name, 'category': body.category,
-                   'pose': [round(body.x, 3), round(body.y, 3), round(body.yaw, 3)]})
+    places.append({
+        'name': body.name,
+        'category': body.category,
+        'pose': [round(body.x, 3), round(body.y, 3), round(body.yaw, 3)]
+    })
     _save_map_places(body.map_name, places)
     return {'ok': True}
 
 
 @app.post('/map/places/add_current')
-async def add_map_place_current(map_name: str, name: str, category: str = 'patrol',
-                                 namespace: str = 'cube_petit_orange'):
+async def add_map_place_current(map_name: str,
+                                name: str,
+                                category: str = 'patrol',
+                                namespace: str = 'cube_petit_orange') -> dict:
     pose = _get_robot_pose(namespace)
     if pose is None:
         return {'ok': False, 'error': 'Cannot get robot position from TF'}
@@ -681,7 +726,7 @@ async def add_map_place_current(map_name: str, name: str, category: str = 'patro
 
 
 @app.delete('/map/places/remove')
-async def remove_map_place(map_name: str, name: str):
+async def remove_map_place(map_name: str, name: str) -> dict:
     places = _load_map_places(map_name)
     places = [p for p in places if p.get('name') != name]
     _save_map_places(map_name, places)
@@ -697,7 +742,7 @@ class PlaceManualBody(BaseModel):
 
 
 @app.post('/places/add_manual')
-async def add_place_manual(body: PlaceManualBody):
+async def add_place_manual(body: PlaceManualBody) -> dict:
     pose = [round(body.x, 3), round(body.y, 3), round(body.yaw, 3)]
     data = _load_places()
     section = data.setdefault(body.category, {'order': [], 'places': {}})
@@ -711,35 +756,23 @@ async def add_place_manual(body: PlaceManualBody):
 
 
 def _find_map_dir(map_name: str) -> Optional[Path]:
-    for base in [MAP_BASE_DIR, MAP_EXTRA_DIR]:
-        d = base / map_name
-        if d.is_dir():
-            return d
-    return None
+    return _helpers.find_map_dir(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _pgm_to_png_bytes(pgm_path: Path) -> bytes:
-    img = Image.open(pgm_path).convert('L')
-    buf = io.BytesIO()
-    img.save(buf, format='PNG')
-    return buf.getvalue()
+    return _helpers.pgm_to_png_bytes(pgm_path)
 
 
 def _png_bytes_to_pgm(png_data: bytes, pgm_path: Path) -> None:
-    img = Image.open(io.BytesIO(png_data)).convert('L')
-    img.save(str(pgm_path), format='PPM')
-    # PPM → PGM: rewrite header
-    pgm_path.write_bytes(_pil_to_pgm_bytes(img))
+    _helpers.png_bytes_to_pgm(png_data, pgm_path)
 
 
 def _pil_to_pgm_bytes(img: Image.Image) -> bytes:
-    w, h = img.size
-    header = f'P5\n{w} {h}\n255\n'.encode()
-    return header + img.tobytes()
+    return _helpers.pil_to_pgm_bytes(img)
 
 
 @app.get('/map/image')
-async def get_map_image(map_name: str, type: str = 'map'):
+async def get_map_image(map_name: str, type: str = 'map') -> Response:  # noqa: A002
     d = _find_map_dir(map_name)
     if d is None:
         raise HTTPException(404, 'Map not found')
@@ -752,7 +785,7 @@ async def get_map_image(map_name: str, type: str = 'map'):
 
 
 @app.get('/map/meta')
-async def get_map_meta(map_name: str):
+async def get_map_meta(map_name: str) -> dict:
     d = _find_map_dir(map_name)
     if d is None:
         raise HTTPException(404, 'Map not found')
@@ -770,7 +803,7 @@ class KeepoutSaveBody(BaseModel):
 
 
 @app.post('/map/keepout/save')
-async def save_keepout(body: KeepoutSaveBody):
+async def save_keepout(body: KeepoutSaveBody) -> dict:
     d = _find_map_dir(body.map_name)
     if d is None:
         raise HTTPException(404, 'Map not found')
@@ -795,18 +828,24 @@ class MapSaveBody(BaseModel):
 
 
 @app.get('/map/preview')
-async def preview_map():
-    """現在のSLAMマップをPNGで返す（保存しない）"""
+async def preview_map() -> dict:
+    """現在のSLAMマップをPNGで返す（保存しない）."""
     import tempfile
     with tempfile.TemporaryDirectory() as tmp:
         dest = Path(tmp) / 'map'
         cmd = [
-            'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
-            '-f', str(dest),
-            '--ros-args', '-r', 'map:=/cube_petit_orange/navigation/map',
+            'ros2',
+            'run',
+            'nav2_map_server',
+            'map_saver_cli',
+            '-f',
+            str(dest),
+            '--ros-args',
+            '-r',
+            'map:=/cube_petit_orange/navigation/map',
         ]
         try:
-            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=ROS_ENV)
+            subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=ROS_ENV)
         except subprocess.TimeoutExpired:
             raise HTTPException(504, 'map_saver timeout')
         pgm = Path(tmp) / 'map.pgm'
@@ -818,21 +857,26 @@ async def preview_map():
         if yml.exists():
             with yml.open() as f:
                 meta = yaml.safe_load(f) or {}
-    from fastapi.responses import JSONResponse
     b64 = base64.b64encode(png_bytes).decode()
     return {'png_base64': b64, 'meta': meta}
 
 
 @app.post('/map/save')
-async def save_map(body: MapSaveBody):
+async def save_map(body: MapSaveBody) -> dict:
     base = MAP_EXTRA_DIR if body.dest == 'extra' else MAP_BASE_DIR
     dest_dir = base / body.map_name
     dest_dir.mkdir(parents=True, exist_ok=True)
     dest_stem = str(dest_dir / 'map')
     cmd = [
-        'ros2', 'run', 'nav2_map_server', 'map_saver_cli',
-        '-f', dest_stem,
-        '--ros-args', '-r', 'map:=/cube_petit_orange/navigation/map',
+        'ros2',
+        'run',
+        'nav2_map_server',
+        'map_saver_cli',
+        '-f',
+        dest_stem,
+        '--ros-args',
+        '-r',
+        'map:=/cube_petit_orange/navigation/map',
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=ROS_ENV)
@@ -865,7 +909,7 @@ class RotateBody(BaseModel):
 
 
 @app.post('/map/rotate')
-async def rotate_map(body: RotateBody):
+async def rotate_map(body: RotateBody) -> dict:
     d = _find_map_dir(body.map_name)
     if d is None:
         raise HTTPException(404, 'Map not found')
@@ -898,29 +942,21 @@ async def rotate_map(body: RotateBody):
 
 # --- マップ別 rooms.yaml ---
 
+
 def _map_rooms_path(map_name: str) -> Optional[Path]:
-    d = _find_map_dir(map_name)
-    return d / 'rooms.yaml' if d else None
+    return _helpers.map_rooms_path(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _load_map_rooms(map_name: str) -> list:
-    p = _map_rooms_path(map_name)
-    if p and p.exists():
-        data = yaml.safe_load(p.read_text(encoding='utf-8')) or {}
-        return data.get('rooms', [])
-    return []
+    return _helpers.load_map_rooms(map_name, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 def _save_map_rooms(map_name: str, rooms: list) -> None:
-    p = _map_rooms_path(map_name)
-    if p is None:
-        return
-    p.parent.mkdir(parents=True, exist_ok=True)
-    p.write_text(yaml.dump({'rooms': rooms}, allow_unicode=True, sort_keys=False), encoding='utf-8')
+    _helpers.save_map_rooms(map_name, rooms, [MAP_BASE_DIR, MAP_EXTRA_DIR])
 
 
 @app.get('/map/rooms')
-async def get_map_rooms(map_name: str):
+async def get_map_rooms(map_name: str) -> dict:
     return {'rooms': _load_map_rooms(map_name)}
 
 
@@ -931,7 +967,7 @@ class RoomBody(BaseModel):
 
 
 @app.post('/map/rooms/add')
-async def add_map_room(body: RoomBody):
+async def add_map_room(body: RoomBody) -> dict:
     rooms = _load_map_rooms(body.map_name)
     rooms = [r for r in rooms if r.get('name') != body.name]
     pts = [[round(p[0], 3), round(p[1], 3)] for p in body.points]
@@ -941,7 +977,7 @@ async def add_map_room(body: RoomBody):
 
 
 @app.delete('/map/rooms/remove')
-async def remove_map_room(map_name: str, name: str):
+async def remove_map_room(map_name: str, name: str) -> dict:
     rooms = _load_map_rooms(map_name)
     rooms = [r for r in rooms if r.get('name') != name]
     _save_map_rooms(map_name, rooms)
@@ -950,42 +986,44 @@ async def remove_map_room(map_name: str, name: str):
 
 # --- places 順序変更 ---
 
+
 class PlacesReorderBody(BaseModel):
     map_name: str
     places: list  # full ordered list
 
 
 @app.post('/map/places/reorder')
-async def reorder_map_places(body: PlacesReorderBody):
+async def reorder_map_places(body: PlacesReorderBody) -> dict:
     _save_map_places(body.map_name, body.places)
     return {'ok': True}
 
 
 # --- 初期位置設定 ---
 
+
 @app.post('/map/initial_pose')
-async def set_initial_pose(x: float, y: float, yaw: float,
-                           namespace: str = 'cube_petit_orange'):
+async def set_initial_pose(x: float, y: float, yaw: float, namespace: str = 'cube_petit_orange') -> dict:
     qz = math.sin(yaw / 2)
     qw = math.cos(yaw / 2)
-    msg = (
-        f'{{header: {{frame_id: map}}, pose: {{pose: {{'
-        f'position: {{x: {x}, y: {y}, z: 0.0}}, '
-        f'orientation: {{x: 0.0, y: 0.0, z: {qz:.6f}, w: {qw:.6f}}}'
-        f'}}}}}}'
-    )
+    msg = (f'{{header: {{frame_id: map}}, pose: {{pose: {{'
+           f'position: {{x: {x}, y: {y}, z: 0.0}}, '
+           f'orientation: {{x: 0.0, y: 0.0, z: {qz:.6f}, w: {qw:.6f}}}'
+           f'}}}}}}')
     cmd = [
-        'ros2', 'topic', 'pub', '--once',
+        'ros2',
+        'topic',
+        'pub',
+        '--once',
         f'/{namespace}/initialpose',
-        'geometry_msgs/PoseWithCovarianceStamped', msg,
+        'geometry_msgs/PoseWithCovarianceStamped',
+        msg,
     ]
-    subprocess.Popen(cmd, env=ROS_ENV,
-                     stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    subprocess.Popen(cmd, env=ROS_ENV, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
     return {'ok': True}
 
 
 @app.post('/map/places/rename')
-async def rename_map_place(map_name: str, old_name: str, new_name: str):
+async def rename_map_place(map_name: str, old_name: str, new_name: str) -> dict:
     places = _load_map_places(map_name)
     for p in places:
         if p.get('name') == old_name:
@@ -996,7 +1034,7 @@ async def rename_map_place(map_name: str, old_name: str, new_name: str):
 
 
 @app.post('/map/rooms/rename')
-async def rename_map_room(map_name: str, old_name: str, new_name: str):
+async def rename_map_room(map_name: str, old_name: str, new_name: str) -> dict:
     rooms = _load_map_rooms(map_name)
     for r in rooms:
         if r.get('name') == old_name:
