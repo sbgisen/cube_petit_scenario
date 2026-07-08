@@ -1,42 +1,45 @@
-import rclpy
-from rclpy.node import Node
-from cube_petit_scenario_msgs.msg import InternalState
+# Copyright (c) 2026 SoftBank Corp.
+#
+# Licensed under the Apache License, Version 2.0 (the "License");
+# you may not use this file except in compliance with the License.
+# You may obtain a copy of the License at
+#
+#     http://www.apache.org/licenses/LICENSE-2.0
+#
+# Unless required by applicable law or agreed to in writing, software
+# distributed under the License is distributed on an "AS IS" BASIS,
+# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+# See the License for the specific language governing permissions and
+# limitations under the License.
 
 import random
-import json
-from pathlib import Path
 import socket
-from cube_petit_scenario_msgs.msg import InternalStateDelta
 
+import rclpy
+from rclpy.node import Node
+
+from cube_petit_anima import internal_state_logic
+from cube_petit_scenario_msgs.msg import InternalState
+from cube_petit_scenario_msgs.msg import InternalStateDelta
 
 
 class InternalStateNode(Node):
 
-    def __init__(self):
+    def __init__(self) -> None:
         super().__init__('internal_state_node')
 
         # Publisher
-        self.pub = self.create_publisher(
-            InternalState,
-            'internal_state',
-            10
-        )
+        self.pub = self.create_publisher(InternalState, 'internal_state', 10)
 
         # Delta subscriber
-        self.delta_sub = self.create_subscription(
-            InternalStateDelta,
-            'internal_state_delta',
-            self.delta_callback,
-            10
-        )
+        self.delta_sub = self.create_subscription(InternalStateDelta, 'internal_state_delta', self.delta_callback, 10)
 
         # Hostname → namespace
         raw_hostname = socket.gethostname()
-        self.namespace = raw_hostname.replace('-', '_')
+        self.namespace = internal_state_logic.hostname_to_namespace(raw_hostname)
 
-        base_dir = Path.home() / '.cube_petit' / self.namespace
-        base_dir.mkdir(parents=True, exist_ok=True)
-        self.state_file = base_dir / 'anima_state.json'
+        self.state_file = internal_state_logic.default_state_file(self.namespace)
+        self.state_file.parent.mkdir(parents=True, exist_ok=True)
 
         self.state = InternalState()
         self.load_state()
@@ -51,16 +54,12 @@ class InternalStateNode(Node):
         self.update_timer = self.create_timer(1.0, self.update_state)
         self.save_timer = self.create_timer(300.0, self.save_state)
 
-        
-
-        self.get_logger().info(
-            f"Anima initialized for host: {self.namespace}"
-        )
+        self.get_logger().info(f'Anima initialized for host: {self.namespace}')
 
     # ==================================
     # Delta input
     # ==================================
-    def delta_callback(self, msg):
+    def delta_callback(self, msg: InternalStateDelta) -> None:
         if msg.human_detected:
             self.human_detect_timer = 5
         self.delta_buffer.append(msg)
@@ -68,7 +67,7 @@ class InternalStateNode(Node):
     # ==================================
     # State update loop (1Hz)
     # ==================================
-    def update_state(self):
+    def update_state(self) -> None:
         if self.human_detect_timer > 0:
             self.human_detect_timer -= 1
             self.state.human_detected = True
@@ -77,61 +76,43 @@ class InternalStateNode(Node):
 
         # --- Base drift ---
         base_d_curiosity = random.uniform(-0.05, 0.05)
-        base_d_boredom = 0.05
 
-        # --- Aggregate deltas ---
-        d_curiosity = base_d_curiosity
-        d_boredom = base_d_boredom
-        d_energy = 0.0
-        d_silence = 0.0
-
-        human_detected = False
-        petit_detected = False
-        sleep_request = False
-
-        for delta in self.delta_buffer:
-            w = max(0.0, min(1.0, delta.weight))
-
-            d_curiosity += delta.d_curiosity * w
-            d_boredom += delta.d_boredom * w
-            d_energy += delta.d_energy * w
-            d_silence += delta.d_silence_bias * w
-
-            human_detected = human_detected or delta.human_detected
-            petit_detected = petit_detected or delta.petit_detected
-            sleep_request = sleep_request or delta.sleep_request
-
+        # msg → plain dict へ変換（計算は internal_state_logic に委譲）
+        deltas = [{
+            'd_curiosity': delta.d_curiosity,
+            'd_boredom': delta.d_boredom,
+            'd_energy': delta.d_energy,
+            'd_silence_bias': delta.d_silence_bias,
+            'weight': delta.weight,
+            'human_detected': delta.human_detected,
+            'petit_detected': delta.petit_detected,
+            'sleep_request': delta.sleep_request,
+        } for delta in self.delta_buffer]
         self.delta_buffer.clear()
 
-        # --- Apply deltas ---
-        self.state.curiosity += d_curiosity
-        self.state.boredom += d_boredom
-        self.state.energy += d_energy
-        self.state.silence_bias += d_silence
+        values = {
+            'curiosity': self.state.curiosity,
+            'boredom': self.state.boredom,
+            'energy': self.state.energy,
+            'silence_bias': self.state.silence_bias,
+        }
 
-        self.state.human_detected = human_detected
-        self.state.petit_detected = petit_detected
+        prev_sleeping = self.is_sleeping
+        new_values, self.is_sleeping = internal_state_logic.update_state(values, deltas, self.is_sleeping,
+                                                                         base_d_curiosity)
 
-        # ==================================
-        # Sleep hysteresis
-        # ==================================
-        if not self.is_sleeping and (self.state.energy <= 20 or sleep_request):
-            self.is_sleeping = True
-            self.get_logger().info("Entering sleep mode")
+        if not prev_sleeping and self.is_sleeping:
+            self.get_logger().info('Entering sleep mode')
+        elif prev_sleeping and not self.is_sleeping:
+            self.get_logger().info('Waking up')
 
-        elif self.is_sleeping and self.state.energy >= 60:
-            self.is_sleeping = False
-            self.get_logger().info("Waking up")
+        self.state.curiosity = new_values['curiosity']
+        self.state.boredom = new_values['boredom']
+        self.state.energy = new_values['energy']
+        self.state.silence_bias = new_values['silence_bias']
 
-        # Energy auto behavior
-        if self.is_sleeping:
-            self.state.energy += 0.4
-            self.state.boredom -= 0.2
-        else:
-            self.state.energy -= 0.05
-
-        # Clamp
-        self.clamp()
+        self.state.human_detected = new_values['human_detected']
+        self.state.petit_detected = new_values['petit_detected']
 
         # Reflect sleep mode into state
         self.state.sleep_mode = self.is_sleeping
@@ -139,37 +120,30 @@ class InternalStateNode(Node):
         self.pub.publish(self.state)
 
     # ==================================
-    def clamp(self):
-        for attr in ['curiosity', 'boredom', 'energy', 'silence_bias']:
-            val = getattr(self.state, attr)
-            setattr(self.state, attr, max(0.0, min(100.0, val)))
-
-    # ==================================
-    def load_state(self):
-        if self.state_file.exists():
-            try:
-                with open(self.state_file, 'r') as f:
-                    data = json.load(f)
-
-                self.state.curiosity = data.get('curiosity', 60.0)
-                self.state.boredom = data.get('boredom', 40.0)
-                self.state.energy = data.get('energy', 80.0)
-                self.state.silence_bias = data.get('silence_bias', 70.0)
-                self.state.body_generation = data.get('body_generation', 1)
-                self.state.human_detected = False
-                self.state.petit_detected = False
-                self.state.sleep_mode = False
-
-                self.get_logger().info("Anima state restored.")
-
-            except Exception as e:
-                self.get_logger().warn(f"Failed to load state: {e}")
+    def load_state(self) -> None:
+        try:
+            values = internal_state_logic.load_state_file(self.state_file)
+            if values is None:
                 self.initialize_default_state()
-        else:
+                return
+
+            self.state.curiosity = values['curiosity']
+            self.state.boredom = values['boredom']
+            self.state.energy = values['energy']
+            self.state.silence_bias = values['silence_bias']
+            self.state.body_generation = values['body_generation']
+            self.state.human_detected = False
+            self.state.petit_detected = False
+            self.state.sleep_mode = False
+
+            self.get_logger().info('Anima state restored.')
+
+        except Exception as e:
+            self.get_logger().warn(f'Failed to load state: {e}')
             self.initialize_default_state()
 
     # ==================================
-    def initialize_default_state(self):
+    def initialize_default_state(self) -> None:
         self.state.curiosity = random.uniform(40, 70)
         self.state.boredom = 50.0
         self.state.energy = 80.0
@@ -180,7 +154,7 @@ class InternalStateNode(Node):
         self.state.sleep_mode = False
 
     # ==================================
-    def save_state(self):
+    def save_state(self) -> None:
         data = {
             'curiosity': self.state.curiosity,
             'boredom': self.state.boredom,
@@ -190,18 +164,17 @@ class InternalStateNode(Node):
         }
 
         try:
-            with open(self.state_file, 'w') as f:
-                json.dump(data, f)
+            internal_state_logic.save_state_file(self.state_file, data)
         except Exception as e:
-            self.get_logger().error(f"Failed to save state: {e}")
+            self.get_logger().error(f'Failed to save state: {e}')
 
     # ==================================
-    def destroy_node(self):
+    def destroy_node(self) -> None:
         self.save_state()
         super().destroy_node()
 
 
-def main():
+def main() -> None:
     rclpy.init()
     node = InternalStateNode()
     try:
