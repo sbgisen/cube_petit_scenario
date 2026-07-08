@@ -40,6 +40,7 @@ class BehaviorNode(Node):
         self.speech_client = ActionClient(self, Speech, 'speech_action_server')
 
         # Swing control
+        self.swing_enabled = (self.declare_parameter('swing_enabled', False).get_parameter_value().bool_value)
         self.swing_active = False
         self.swing_phase = 0.0
         self.last_speak_time = 0.0
@@ -63,18 +64,14 @@ class BehaviorNode(Node):
 
         prev_swing = self.swing_active
 
-        if state.energy < 20:
-            self.swing_active = False
+        self.swing_active = behavior_logic.compute_swing_active(self.swing_enabled, state.energy, state.boredom)
 
-        elif state.boredom > 80:
-            self.swing_active = False
+        if (state.energy >= behavior_logic.ENERGY_LOW_THRESHOLD and
+                state.boredom > behavior_logic.BOREDOM_HIGH_THRESHOLD):
             if (now - self.last_se_time) > self.se_cooldown:
                 self.get_logger().info('play SE: 喜び')
                 self.se.play('感情：興味')
                 self.last_se_time = now
-
-        else:
-            self.swing_active = False
 
         # --- 状態変化検出 ---
         if not prev_swing and self.swing_active:
@@ -113,13 +110,6 @@ class BehaviorNode(Node):
             msg.twist.angular.z = 0.0
 
         self.motion_pub.publish(msg)
-
-    # ==================================
-    # Sleep
-    # ==================================
-    def sleep_mode(self) -> None:
-        self.swing_active = False
-        self.last_swing_active = True
 
     # ==================================
     # Speak
