@@ -35,13 +35,21 @@ def generate_launch_description():
         description='Use simulation clock'
     )
 
+    robot_arg = DeclareLaunchArgument(
+        'robot',
+        default_value='cube_petit_orange',
+        description='Robot namespace.'
+    )
+
     use_sim_time = LaunchConfiguration('use_sim_time')
 
     return LaunchDescription([
 
         use_sim_time_arg,
 
-        PushRosNamespace('cube_petit_orange'),
+        robot_arg,
+
+        PushRosNamespace(LaunchConfiguration('robot')),
 
         Node(
             package=package_name,
