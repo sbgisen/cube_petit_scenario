@@ -16,8 +16,9 @@
 import json
 from pathlib import Path
 
-from cube_petit_anima import internal_state_logic as logic
 import pytest
+
+from cube_petit_anima import internal_state_logic as logic
 
 
 def make_delta(d_curiosity: float = 0.0,

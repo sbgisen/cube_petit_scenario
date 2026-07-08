@@ -15,11 +15,12 @@
 import random
 import socket
 
+import rclpy
+from rclpy.node import Node
+
 from cube_petit_anima import internal_state_logic
 from cube_petit_scenario_msgs.msg import InternalState
 from cube_petit_scenario_msgs.msg import InternalStateDelta
-import rclpy
-from rclpy.node import Node
 
 
 class InternalStateNode(Node):

@@ -15,8 +15,9 @@
 
 import math
 
-from cube_petit_anima import behavior_logic as logic
 import pytest
+
+from cube_petit_anima import behavior_logic as logic
 
 
 class TestComputeSwing:

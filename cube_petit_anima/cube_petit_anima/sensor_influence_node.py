@@ -14,8 +14,6 @@
 
 import time
 
-from cube_petit_anima import sensor_influence_logic
-from cube_petit_scenario_msgs.msg import InternalStateDelta
 from cube_petit_speech_msgs.msg import AudioDataStamped
 from geometry_msgs.msg import PoseStamped
 from nav_msgs.msg import Odometry
@@ -26,6 +24,9 @@ from sensor_msgs.msg import Image
 from sensor_msgs.msg import LaserScan
 from std_msgs.msg import Bool
 from std_msgs.msg import Empty
+
+from cube_petit_anima import sensor_influence_logic
+from cube_petit_scenario_msgs.msg import InternalStateDelta
 
 
 class SensorInfluenceNode(Node):

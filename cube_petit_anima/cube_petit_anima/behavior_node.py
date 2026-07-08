@@ -15,14 +15,15 @@
 import random
 import time
 
-from cube_petit_anima import behavior_logic
-from cube_petit_anima.utils.sound_effect_play import SEPlayer
-from cube_petit_scenario_msgs.msg import InternalState
 from cube_petit_speech_msgs.action import Speech
 from geometry_msgs.msg import TwistStamped
 import rclpy
 from rclpy.action import ActionClient
 from rclpy.node import Node
+
+from cube_petit_anima import behavior_logic
+from cube_petit_anima.utils.sound_effect_play import SEPlayer
+from cube_petit_scenario_msgs.msg import InternalState
 
 
 class BehaviorNode(Node):

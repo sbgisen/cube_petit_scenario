@@ -17,9 +17,10 @@ import json
 from pathlib import Path
 from typing import Callable
 
-from cube_petit_anima.utils.sound_effect_play import SEPlayer
 import pytest
 import yaml
+
+from cube_petit_anima.utils.sound_effect_play import SEPlayer
 
 
 @pytest.fixture

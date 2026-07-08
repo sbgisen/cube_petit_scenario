@@ -13,8 +13,9 @@
 # limitations under the License.
 """sensor_influence_logic のテスト."""
 
-from cube_petit_anima import sensor_influence_logic as logic
 import pytest
+
+from cube_petit_anima import sensor_influence_logic as logic
 
 
 class TestCalcMicVolume:
