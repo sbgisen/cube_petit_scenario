@@ -54,3 +54,32 @@ class TestComputeSwing:
         assert logic.SWING_SPEED == pytest.approx(1.2)
         assert logic.SWING_DT == pytest.approx(0.1)
         assert logic.ANGULAR_Z_LIMIT == pytest.approx(1.5)
+
+
+class TestComputeSwingActive:
+
+    def test_disabled_never_swings(self) -> None:
+        # swing_enabled=False なら条件を満たしても常に False（従来の挙動）
+        assert logic.compute_swing_active(False, energy=100.0, boredom=100.0) is False
+        assert logic.compute_swing_active(False, energy=0.0, boredom=0.0) is False
+
+    def test_enabled_swings_when_bored_and_energetic(self) -> None:
+        assert logic.compute_swing_active(True, energy=50.0, boredom=90.0) is True
+
+    def test_enabled_no_swing_when_energy_low(self) -> None:
+        assert logic.compute_swing_active(True, energy=19.99, boredom=90.0) is False
+
+    def test_enabled_no_swing_when_not_bored(self) -> None:
+        assert logic.compute_swing_active(True, energy=50.0, boredom=50.0) is False
+
+    def test_energy_threshold_boundary(self) -> None:
+        # energy はしきい値ちょうどで許可（元コードは energy < 20 で除外）
+        assert logic.compute_swing_active(True, energy=20.0, boredom=90.0) is True
+
+    def test_boredom_threshold_boundary(self) -> None:
+        # boredom はしきい値ちょうどでは発動しない（元コードは boredom > 80）
+        assert logic.compute_swing_active(True, energy=50.0, boredom=80.0) is False
+
+    def test_thresholds_match_original_parameters(self) -> None:
+        assert logic.ENERGY_LOW_THRESHOLD == 20
+        assert logic.BOREDOM_HIGH_THRESHOLD == 80
