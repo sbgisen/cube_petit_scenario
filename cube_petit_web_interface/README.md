@@ -30,7 +30,18 @@ cube_petit_web_interface/
 │           ├── useRosAction.ts
 │           └── useRosService.ts
 ├── cube_petit_web_interface/
-│   ├── api_server.py          # FastAPI バックエンド（launch 制御・マップ管理）
+│   ├── api_server.py          # FastAPI エントリポイント（app 生成・router 登録）
+│   ├── core.py                # 共有基盤（rclpy 常駐ノード・TF・launch プロセス・定数）
+│   ├── helpers.py             # 純粋ヘルパー関数（rclpy / FastAPI 非依存）
+│   ├── routers/               # ドメイン別 APIRouter
+│   │   ├── launch.py          #   /launch/*（launch 制御）
+│   │   ├── system.py          #   /system/devices, /action/exists, /ros/nodes, /ros/robot_pose
+│   │   ├── conversation.py    #   /ros/conversation/*
+│   │   ├── audio.py           #   /audio/volume
+│   │   ├── map_router.py      #   /map/*（マップ管理・places/rooms・保存・回転）
+│   │   ├── places.py          #   /places/*（グローバル places.yaml）
+│   │   ├── prompt.py          #   /prompt/*
+│   │   └── history.py         #   /history/*
 │   └── internal_state_relay.py
 └── img/                       # ロボットアイコン画像
 ```
