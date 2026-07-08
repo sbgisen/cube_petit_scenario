@@ -25,6 +25,29 @@ SWING_SPEED = 1.2
 SWING_DT = 0.1
 ANGULAR_Z_LIMIT = 1.5
 
+# スイング開始判定のしきい値（callback 由来）
+ENERGY_LOW_THRESHOLD = 20
+BOREDOM_HIGH_THRESHOLD = 80
+
+
+# ==================================
+def compute_swing_active(swing_enabled: bool,
+                         energy: float,
+                         boredom: float,
+                         energy_threshold: float = ENERGY_LOW_THRESHOLD,
+                         boredom_threshold: float = BOREDOM_HIGH_THRESHOLD) -> bool:
+    """スイング動作を行うべきかの判定.
+
+    swing_enabled が False なら常に False（従来どおりスイングしない）。
+    True の場合、エネルギーが十分（energy >= energy_threshold）かつ
+    退屈度が高い（boredom > boredom_threshold）ときにスイングする。
+    """
+    if not swing_enabled:
+        return False
+    if energy < energy_threshold:
+        return False
+    return boredom > boredom_threshold
+
 
 # ==================================
 def compute_swing(phase: float,
