@@ -33,4 +33,4 @@ jobs:
       - name: Install test dependencies
         run: pip install pytest pyyaml pillow numpy fastapi
       - name: Run unit tests
-        run: python -m pytest cube_petit_anima/test cube_petit_web_interface/test -v
+        run: python -m pytest cube_petit_anima/test cube_petit_web_interface/test cube_petit_scenario/test -v
