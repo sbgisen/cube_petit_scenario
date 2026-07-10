@@ -43,13 +43,22 @@ def generate_launch_description() -> LaunchDescription:
                                       default_value='false',
                                       description='Enable swing motion of behavior_node.')
 
+    # Default matches behavior_logic.SWING_AMPLITUDE. Kept adjustable here so the value
+    # can be raised for real-robot tuning without touching code (2026-07-10 feedback:
+    # 1.5 was too weak to overcome static friction).
+    swing_amplitude_arg = DeclareLaunchArgument('swing_amplitude',
+                                                default_value='4.0',
+                                                description='Amplitude [rad/s] of the swing angular.z command.')
+
     use_sim_time = LaunchConfiguration('use_sim_time')
     swing_enabled = LaunchConfiguration('swing')
+    swing_amplitude = LaunchConfiguration('swing_amplitude')
 
     return LaunchDescription([
         use_sim_time_arg,
         robot_arg,
         swing_arg,
+        swing_amplitude_arg,
         PushRosNamespace(LaunchConfiguration('robot')),
         Node(package=package_name,
              executable='internal_state_node',
@@ -72,7 +81,8 @@ def generate_launch_description() -> LaunchDescription:
                  config_file, {
                      'use_sim_time': use_sim_time,
                      'config_se_path': config_se_path,
-                     'swing_enabled': swing_enabled
+                     'swing_enabled': swing_enabled,
+                     'swing_amplitude': swing_amplitude
                  }
              ],
              output='screen'),

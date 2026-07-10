@@ -29,31 +29,40 @@ class TestComputeSwing:
     def test_value_is_amplitude_times_sin(self) -> None:
         phase = 1.0
         new_phase, value = logic.compute_swing(phase)
-        assert value == pytest.approx(1.5 * math.sin(new_phase))
+        assert value == pytest.approx(logic.SWING_AMPLITUDE * math.sin(new_phase))
 
     def test_value_within_limit(self) -> None:
-        # 位相を進めていっても指令値は ±1.5 を超えない
+        # 位相を進めていっても指令値は ±ANGULAR_Z_LIMIT を超えない
         phase = 0.0
         for _ in range(200):
             phase, value = logic.compute_swing(phase)
-            assert -1.5 <= value <= 1.5
+            assert -logic.ANGULAR_Z_LIMIT <= value <= logic.ANGULAR_Z_LIMIT
+
+    def test_value_is_amplitude_argument_times_sin(self) -> None:
+        # amplitude を明示的に渡した場合、その値が使われる（ノード側の
+        # swing_amplitude パラメータ配線が正しく動くことの前提となる挙動）
+        phase = 1.0
+        new_phase, value = logic.compute_swing(phase, amplitude=2.0)
+        assert value == pytest.approx(2.0 * math.sin(new_phase))
 
     def test_clamp_when_amplitude_exceeds_limit(self) -> None:
-        # sin がほぼ 1 になる位相で振幅を大きくするとクランプされる
+        # sin がほぼ 1 になる位相で振幅を limit 超えまで大きくするとクランプされる
         phase = math.pi / 2 - 0.1 * 1.2  # 進めた後に pi/2 になる
-        _, value = logic.compute_swing(phase, amplitude=3.0)
-        assert value == pytest.approx(1.5)
+        _, value = logic.compute_swing(phase, amplitude=logic.ANGULAR_Z_LIMIT + 1.0)
+        assert value == pytest.approx(logic.ANGULAR_Z_LIMIT)
 
     def test_clamp_negative_side(self) -> None:
         phase = -math.pi / 2 - 0.1 * 1.2
-        _, value = logic.compute_swing(phase, amplitude=3.0)
-        assert value == pytest.approx(-1.5)
+        _, value = logic.compute_swing(phase, amplitude=logic.ANGULAR_Z_LIMIT + 1.0)
+        assert value == pytest.approx(-logic.ANGULAR_Z_LIMIT)
 
-    def test_defaults_match_original_parameters(self) -> None:
-        assert logic.SWING_AMPLITUDE == pytest.approx(1.5)
+    def test_defaults_match_updated_parameters(self) -> None:
+        # 2026-07-10 実機フィードバック対応: amplitude/limit を引き上げ
+        # (teleopの scale_angular.yaw=5.0 を安全上限として採用)
+        assert logic.SWING_AMPLITUDE == pytest.approx(4.0)
         assert logic.SWING_SPEED == pytest.approx(1.2)
         assert logic.SWING_DT == pytest.approx(0.1)
-        assert logic.ANGULAR_Z_LIMIT == pytest.approx(1.5)
+        assert logic.ANGULAR_Z_LIMIT == pytest.approx(5.0)
 
 
 class TestComputeSwingActive:

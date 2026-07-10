@@ -20,10 +20,15 @@ ROS に依存しない（rclpy / msgs を import しない）ため、
 import math
 
 # スイング動作のデフォルトパラメータ（update_motion 由来）
-SWING_AMPLITUDE = 1.5
+# 実機フィードバック(2026-07-10): amplitude=1.5 では静止摩擦に負けてほぼ回らなかった
+# (指令 angular.z≈1.35 に対し odom は±0.03程度)。
+# teleop(ps4.config.yaml の scale_angular.yaw=5.0、turbo側の上書きなし＝実質的な上限)を
+# 基準に、その上限を超えない範囲でamplitudeを引き上げる。
+SWING_AMPLITUDE = 4.0
 SWING_SPEED = 1.2
 SWING_DT = 0.1
-ANGULAR_Z_LIMIT = 1.5
+# teleopの scale_angular.yaw(5.0)を安全上限として採用（teleopで実際に到達している値のため）
+ANGULAR_Z_LIMIT = 5.0
 
 # スイング開始判定のしきい値（callback 由来）
 ENERGY_LOW_THRESHOLD = 20

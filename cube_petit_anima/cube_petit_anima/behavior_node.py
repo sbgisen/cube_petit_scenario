@@ -41,6 +41,11 @@ class BehaviorNode(Node):
 
         # Swing control
         self.swing_enabled = (self.declare_parameter('swing_enabled', False).get_parameter_value().bool_value)
+        # Amplitude of the swing angular.z command [rad/s]. Adjustable without code changes,
+        # since the right value depends on the real robot's static friction (see behavior_logic
+        # for the reasoning behind the default).
+        self.swing_amplitude = (self.declare_parameter(
+            'swing_amplitude', behavior_logic.SWING_AMPLITUDE).get_parameter_value().double_value)
         self.swing_active = False
         self.swing_phase = 0.0
         self.last_speak_time = 0.0
@@ -105,7 +110,8 @@ class BehaviorNode(Node):
         msg.header.frame_id = 'base_link'
 
         if self.swing_active:
-            self.swing_phase, msg.twist.angular.z = behavior_logic.compute_swing(self.swing_phase)
+            self.swing_phase, msg.twist.angular.z = behavior_logic.compute_swing(self.swing_phase,
+                                                                                 amplitude=self.swing_amplitude)
         else:
             msg.twist.angular.z = 0.0
 
