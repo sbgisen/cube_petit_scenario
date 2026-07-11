@@ -83,7 +83,8 @@ LAUNCH_COMMANDS = {
         'cube_petit_scenario',
         'cube_petit_talk_demo.launch.py',
         f'setting_file:={PROMPT_DIR}/lt_demo_prompt.txt',
-        "tool_names:=['change_expression']",
+        # tool_namesはlaunchデフォルトを置き換えるため、デフォルト4ツール+追加分を明示する
+        "tool_names:=['horoscope', 'weather', 'memory_voice', 'memory_name', 'change_expression']",
         "gpt_tool_names:=['gpt_chat', 'infer_object']",
         ('gpt_tools.infer_object.setting_path:=/home/cube-petit/ros/install/cube_petit_chat/'
          'share/cube_petit_chat/config/gpt_tools/infer_object/infer_object.txt'),
