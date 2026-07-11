@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import * as ROSLIB from 'roslib';
 import NoPhotographyIcon from '@mui/icons-material/NoPhotography';
+import PhotoCameraIcon from '@mui/icons-material/PhotoCamera';
 import { useRosTopic } from '../hooks/useRosTopic';
 
 interface CompressedImage {
@@ -14,19 +16,59 @@ interface Props {
   height?: number;
   flex?: boolean;
   fitWidth?: boolean; // 幅いっぱい・縦横比維持
+  // 親にON/OFFボタンがない配置(会話タブ等)用の内蔵トグル。
+  // 操作タブは既存の「カメラ」レイヤーボタン(enabled)が唯一のスイッチなので使わない
+  toggleable?: boolean;
 }
 
-export function CameraView({ ros, namespace, enabled, height = 200, flex = false, fitWidth = false }: Props) {
+// rosbridge越しの常時subscribeは重いため、ボタンで明示的にONにした時だけ購読する。
+// OFFにする・アンマウントする際は useRosTopic 側のクリーンアップで必ずunsubscribeされる。
+const CAMERA_THROTTLE_MS = 200; // 約5fps。表示用途としては十分
+
+export function CameraView({ ros, namespace, enabled, height = 200, flex = false, fitWidth = false,
+                             toggleable = false }: Props) {
+  const [active, setActive] = useState(false);
+  const subscribing = enabled && (!toggleable || active);
+
   const image = useRosTopic<CompressedImage>(
     ros,
     `/${namespace}/camera/camera/color/image_raw/compressed`,
     'sensor_msgs/CompressedImage',
+    subscribing,
+    { throttleRate: CAMERA_THROTTLE_MS, queueLength: 1 }, // queue_length:1で古いフレームを溜めず常に最新のみ受信
+  );
+
+  const toggleButton = toggleable && (
+    <button
+      onClick={() => setActive((v) => !v)}
+      style={{
+        position: 'absolute', top: 6, right: 6, zIndex: 1,
+        display: 'flex', alignItems: 'center', gap: 4,
+        padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+        background: active ? '#ff6600' : 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 12,
+      }}
+    >
+      <PhotoCameraIcon style={{ fontSize: 14 }} />
+      カメラ表示
+    </button>
+  );
+
+  const placeholder = (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: 'var(--t-border2)' }}>
+      <NoPhotographyIcon style={{ fontSize: 40 }} />
+      {!subscribing && (
+        <span style={{ fontSize: 11 }}>
+          {toggleable ? 'ボタンで表示開始' : '「カメラ」ボタンで表示開始'}
+        </span>
+      )}
+    </div>
   );
 
   if (fitWidth) {
     return (
-      <div style={{ width: '100%', background: 'var(--t-surface)', borderRadius: 8, overflow: 'hidden' }}>
-        {image && enabled ? (
+      <div style={{ position: 'relative', width: '100%', background: 'var(--t-surface)', borderRadius: 8, overflow: 'hidden' }}>
+        {toggleButton}
+        {image && subscribing ? (
           <img
             src={`data:image/${image.format};base64,${image.data}`}
             style={{ width: '100%', height: 'auto', display: 'block' }}
@@ -34,7 +76,7 @@ export function CameraView({ ros, namespace, enabled, height = 200, flex = false
           />
         ) : (
           <div style={{ aspectRatio: '4/3', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <NoPhotographyIcon style={{ color: 'var(--t-border2)', fontSize: 40 }} />
+            {placeholder}
           </div>
         )}
       </div>
@@ -43,19 +85,21 @@ export function CameraView({ ros, namespace, enabled, height = 200, flex = false
 
   return (
     <div style={{
+      position: 'relative',
       ...(flex ? { flex: 1, minHeight: 0 } : { height, flexShrink: 0 }),
       background: 'var(--t-surface)', borderRadius: 8,
       display: 'flex', alignItems: 'center', justifyContent: 'center',
       overflow: 'hidden',
     }}>
-      {image && enabled ? (
+      {toggleButton}
+      {image && subscribing ? (
         <img
           src={`data:image/${image.format};base64,${image.data}`}
           style={{ width: '100%', height: '100%', objectFit: 'contain' }}
           alt="camera"
         />
       ) : (
-        <NoPhotographyIcon style={{ color: 'var(--t-border2)', fontSize: 40 }} />
+        placeholder
       )}
     </div>
   );

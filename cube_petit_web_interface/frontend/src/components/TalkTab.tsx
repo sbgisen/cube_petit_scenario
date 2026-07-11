@@ -49,7 +49,7 @@ export function TalkTab({ ros, namespace, quickPhrases, setQuickPhrases, apiUrl 
     <div style={{ display: 'flex', gap: 12, height: '100%', overflow: 'hidden' }}>
       {/* 左: カメラ + クイックフレーズ + Anima + 会話トグル */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 320, flexShrink: 0, overflowY: 'auto' }}>
-        <CameraView ros={ros} namespace={namespace} enabled height={200} />
+        <CameraView ros={ros} namespace={namespace} enabled toggleable height={200} />
         <QuickPhraseGrid phrases={quickPhrases} onSpeak={speak} onAdd={addPhrase} speechAvailable={true} />
         <AnimaPanel ros={ros} namespace={namespace} />
         <button

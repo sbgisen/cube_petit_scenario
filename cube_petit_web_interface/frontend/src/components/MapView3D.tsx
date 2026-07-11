@@ -54,9 +54,14 @@ export function MapView3D({ ros, namespace, layers, width, height }: Props) {
   const doaArrowRef = useRef<THREE.ArrowHelper | null>(null);
   const frameRef = useRef<number>(0);
 
-  const scan = useRosTopic<LaserScan>(ros, `/${namespace}/scan`, 'sensor_msgs/LaserScan', layers.lidar);
-  const markers = useRosTopic<MarkerArray>(ros, '/object_detection/laser/marker', 'visualization_msgs/MarkerArray', layers.people);
-  const doa = useRosTopic<PoseStamped>(ros, `/${namespace}/doa`, 'geometry_msgs/PoseStamped', layers.doa);
+  // 各購読にthrottle_rate/queue_length(ms/件)を指定してrosbridgeの負荷を抑える。
+  // queue_length:1で古いフレームを溜めず常に最新のみ受信
+  const scan = useRosTopic<LaserScan>(ros, `/${namespace}/scan`, 'sensor_msgs/LaserScan', layers.lidar,
+    { throttleRate: 300, queueLength: 1 });
+  const markers = useRosTopic<MarkerArray>(ros, '/object_detection/laser/marker', 'visualization_msgs/MarkerArray', layers.people,
+    { queueLength: 1 });
+  const doa = useRosTopic<PoseStamped>(ros, `/${namespace}/doa`, 'geometry_msgs/PoseStamped', layers.doa,
+    { queueLength: 1 });
 
   // シーン初期化
   useEffect(() => {

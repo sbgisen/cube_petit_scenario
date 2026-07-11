@@ -122,17 +122,28 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     return img;
   }, []);
 
-  const scan = useRosTopic<LaserScan>(ros, `/${namespace}/scan`, 'sensor_msgs/LaserScan', layers.lidar);
-  const markers = useRosTopic<MarkerArray>(ros, '/object_detection/laser/marker', 'visualization_msgs/MarkerArray', layers.people);
-  const doa = useRosTopic<PoseStamped>(ros, `/${namespace}/doa`, 'geometry_msgs/PoseStamped', layers.doa);
-  const odom = useRosTopic<Odometry>(ros, `/${namespace}/odom`, 'nav_msgs/Odometry', frame === 'odom' || layers.costmap);
+  // 各購読にthrottle_rate/queue_length(ms/件)を指定してrosbridgeの負荷を抑える。
+  // queue_length:1で古いフレームを溜めず常に最新のみ受信
+  const scan = useRosTopic<LaserScan>(ros, `/${namespace}/scan`, 'sensor_msgs/LaserScan', layers.lidar,
+    { throttleRate: 300, queueLength: 1 });
+  const markers = useRosTopic<MarkerArray>(ros, '/object_detection/laser/marker', 'visualization_msgs/MarkerArray', layers.people,
+    { queueLength: 1 });
+  const doa = useRosTopic<PoseStamped>(ros, `/${namespace}/doa`, 'geometry_msgs/PoseStamped', layers.doa,
+    { queueLength: 1 });
+  const odom = useRosTopic<Odometry>(ros, `/${namespace}/odom`, 'nav_msgs/Odometry', frame === 'odom' || layers.costmap,
+    { throttleRate: 200, queueLength: 1 });
   const mapTf = useRosTf(ros, 'map', `${namespace}/base_link`, frame === 'map' || layers.map || layers.plan);
   const mapOdomTf = useRosTf(ros, 'map', `${namespace}/odom`, frame === 'map' && layers.costmap);
-  const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map);
-  const costmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/global_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
-  const localCostmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/local_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap);
-  const globalPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/plan`, 'nav_msgs/Path', layers.plan);
-  const localPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/local_plan`, 'nav_msgs/Path', layers.plan);
+  const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map,
+    { queueLength: 1 }); // latched・低頻度なのでthrottle不要
+  const costmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/global_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap,
+    { throttleRate: 1000, queueLength: 1 });
+  const localCostmapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/local_costmap/costmap`, 'nav_msgs/OccupancyGrid', layers.costmap,
+    { throttleRate: 1000, queueLength: 1 });
+  const globalPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/plan`, 'nav_msgs/Path', layers.plan,
+    { throttleRate: 500, queueLength: 1 });
+  const localPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/local_plan`, 'nav_msgs/Path', layers.plan,
+    { throttleRate: 500, queueLength: 1 });
 
   const centeredForMapRef = useRef(false);
 
