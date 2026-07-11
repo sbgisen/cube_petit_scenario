@@ -16,15 +16,19 @@ interface Props {
   height?: number;
   flex?: boolean;
   fitWidth?: boolean; // 幅いっぱい・縦横比維持
+  // 親にON/OFFボタンがない配置(会話タブ等)用の内蔵トグル。
+  // 操作タブは既存の「カメラ」レイヤーボタン(enabled)が唯一のスイッチなので使わない
+  toggleable?: boolean;
 }
 
 // rosbridge越しの常時subscribeは重いため、ボタンで明示的にONにした時だけ購読する。
 // OFFにする・アンマウントする際は useRosTopic 側のクリーンアップで必ずunsubscribeされる。
 const CAMERA_THROTTLE_MS = 200; // 約5fps。表示用途としては十分
 
-export function CameraView({ ros, namespace, enabled, height = 200, flex = false, fitWidth = false }: Props) {
+export function CameraView({ ros, namespace, enabled, height = 200, flex = false, fitWidth = false,
+                             toggleable = false }: Props) {
   const [active, setActive] = useState(false);
-  const subscribing = active && enabled;
+  const subscribing = enabled && (!toggleable || active);
 
   const image = useRosTopic<CompressedImage>(
     ros,
@@ -34,7 +38,7 @@ export function CameraView({ ros, namespace, enabled, height = 200, flex = false
     { throttleRate: CAMERA_THROTTLE_MS, queueLength: 1 }, // queue_length:1で古いフレームを溜めず常に最新のみ受信
   );
 
-  const toggleButton = (
+  const toggleButton = toggleable && (
     <button
       onClick={() => setActive((v) => !v)}
       style={{
@@ -52,7 +56,11 @@ export function CameraView({ ros, namespace, enabled, height = 200, flex = false
   const placeholder = (
     <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, color: 'var(--t-border2)' }}>
       <NoPhotographyIcon style={{ fontSize: 40 }} />
-      {!active && <span style={{ fontSize: 11 }}>ボタンで表示開始</span>}
+      {!subscribing && (
+        <span style={{ fontSize: 11 }}>
+          {toggleable ? 'ボタンで表示開始' : '「カメラ」ボタンで表示開始'}
+        </span>
+      )}
     </div>
   );
 
