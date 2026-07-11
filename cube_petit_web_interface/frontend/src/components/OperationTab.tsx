@@ -31,7 +31,8 @@ const LAYER_LABELS: { key: keyof LayerVisibility; label: string }[] = [
 
 export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhrases }: Props) {
   const [layers, setLayers] = useState<LayerVisibility>({
-    lidar: true, map: true, costmap: true, plan: true, people: true, doa: true, camera: true,
+    // lidar: rosbridge越しのscan購読は重いため、デフォルトOFF(レイヤーボタンでONにした時だけ購読)
+    lidar: false, map: true, costmap: true, plan: true, people: true, doa: true, camera: true,
   });
   const [is3D, setIs3D] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>('view');

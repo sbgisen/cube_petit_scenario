@@ -33,9 +33,18 @@ function getAngle(a: React.Touch, b: React.Touch) {
   return Math.atan2(b.clientY - a.clientY, b.clientX - a.clientX);
 }
 
+// rosbridge越しの常時subscribeは重いため、ボタンで明示的にONにした時だけ購読する。
+// OFFにする・アンマウントする際は useRosTopic 側のクリーンアップで必ずunsubscribeされる。
+const LIDAR_THROTTLE_MS = 300; // 約3.3Hz。表示用途としては十分
+
 export function LidarView({ ros, namespace, enabled, width, height }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null);
-  const scan = useRosTopic<LaserScan>(ros, `/${namespace}/scan`, 'sensor_msgs/LaserScan', enabled);
+  const [active, setActive] = useState(false);
+  const subscribing = active && enabled;
+  const scan = useRosTopic<LaserScan>(
+    ros, `/${namespace}/scan`, 'sensor_msgs/LaserScan', subscribing,
+    { throttleRate: LIDAR_THROTTLE_MS, queueLength: 1 }, // queue_length:1で古いフレームを溜めず常に最新のみ受信
+  );
 
   const [view, setView] = useState<ViewState>({ scale: 1, rotation: 0, offsetX: 0, offsetY: 0 });
   const viewRef = useRef(view);
@@ -94,7 +103,7 @@ export function LidarView({ ros, namespace, enabled, width, height }: Props) {
     ctx.stroke();
 
     // LiDAR点群
-    if (scan && enabled) {
+    if (scan && subscribing) {
       ctx.fillStyle = '#00ff88';
       scan.ranges.forEach((r, i) => {
         if (r === 0 || r > scan.range_max) return;
@@ -123,7 +132,7 @@ export function LidarView({ ros, namespace, enabled, width, height }: Props) {
     ctx.stroke();
 
     ctx.restore();
-  }, [scan, enabled, width, height, view]);
+  }, [scan, subscribing, width, height, view]);
 
   // ピンチ・回転（タッチ）
   const handleTouchStart = (e: React.TouchEvent) => {
@@ -222,6 +231,24 @@ export function LidarView({ ros, namespace, enabled, width, height }: Props) {
       >
         リセット
       </button>
+      <button
+        onClick={() => setActive((v) => !v)}
+        style={{
+          position: 'absolute', top: 8, right: 8,
+          padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
+          background: active ? '#ff6600' : 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 12,
+        }}
+      >
+        LiDAR表示
+      </button>
+      {!subscribing && (
+        <div style={{
+          position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center',
+          pointerEvents: 'none', color: 'rgba(255,255,255,0.5)', fontSize: 12,
+        }}>
+          ボタンで表示開始
+        </div>
+      )}
     </div>
   );
 }
