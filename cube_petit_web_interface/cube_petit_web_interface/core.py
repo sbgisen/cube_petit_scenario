@@ -74,7 +74,15 @@ processes: dict[str, Optional[subprocess.Popen]] = {
 LAUNCH_COMMANDS = {
     'rosbridge': ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml'],
     'bringup': ['ros2', 'launch', 'cube_petit_bringup', 'cube_petit_bringup.launch.py'],
-    'demo': ['ros2', 'launch', 'cube_petit_scenario', 'cube_petit_talk_demo.launch.py'],
+    # demo: 02_DEMO_VISION 相当。プロンプトは PROMPT_DIR の .active_prompt が指すファイル
+    # (lt_demo_prompt.txt は slides 側へのsymlink)。視覚(infer_object)+Web検索(gpt_chat)を有効化
+    'demo': [
+        'ros2', 'launch', 'cube_petit_scenario', 'cube_petit_talk_demo.launch.py',
+        f'setting_file:={PROMPT_DIR}/lt_demo_prompt.txt',
+        "gpt_tool_names:=['gpt_chat', 'infer_object']",
+        ('gpt_tools.infer_object.setting_path:=/home/cube-petit/ros/install/cube_petit_chat/'
+         'share/cube_petit_chat/config/gpt_tools/infer_object/infer_object.txt'),
+    ],
     'anima': ['ros2', 'launch', 'cube_petit_anima', 'anima.launch.py'],
     'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map_orange.launch.py'],
     'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation_orange.launch.py'],
