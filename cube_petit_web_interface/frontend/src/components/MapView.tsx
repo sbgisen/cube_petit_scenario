@@ -132,7 +132,9 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     { queueLength: 1 });
   const odom = useRosTopic<Odometry>(ros, `/${namespace}/odom`, 'nav_msgs/Odometry', frame === 'odom' || layers.costmap,
     { throttleRate: 200, queueLength: 1 });
-  const mapTf = useRosTf(ros, 'map', `${namespace}/base_link`, frame === 'map' || layers.map || layers.plan);
+  // goal/initialposeモードではタップ座標をmap座標へ変換するためmapフレームTFが必要
+  const mapTf = useRosTf(ros, 'map', `${namespace}/base_link`,
+    frame === 'map' || layers.map || layers.plan || mode === 'goal' || mode === 'initialpose');
   const mapOdomTf = useRosTf(ros, 'map', `${namespace}/odom`, frame === 'map' && layers.costmap);
   const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map,
     { queueLength: 1 }); // latched・低頻度なのでthrottle不要
@@ -144,6 +146,17 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     { throttleRate: 500, queueLength: 1 });
   const localPlan = useRosTopic<Path>(ros, `/${namespace}/navigation/local_plan`, 'nav_msgs/Path', layers.plan,
     { throttleRate: 500, queueLength: 1 });
+
+  // タッチハンドラはマウント時のクロージャで呼ばれるため、可変値はrefから読む
+  // (width/heightをクロージャで掴むと初期サイズのままになりタップ位置がズレる)
+  const sizeRef = useRef({ width, height });
+  sizeRef.current = { width, height };
+  const frameRef = useRef(frame);
+  frameRef.current = frame;
+  const mapTfRef = useRef(mapTf);
+  mapTfRef.current = mapTf;
+  const odomRef = useRef(odom);
+  odomRef.current = odom;
 
   const centeredForMapRef = useRef(false);
 
@@ -290,6 +303,12 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     const robot_odom_y = odom?.pose.pose.position.y ?? 0;
     const robotCanvasX = inMapFrame ? -robot_map_y * s : inOdomFrame ? -robot_odom_y * s : 0;
     const robotCanvasY = inMapFrame ? -robot_map_x * s : inOdomFrame ? -robot_odom_x * s : 0;
+    // map座標の点を現フレームで描くときのオフセット
+    // mapフレーム: 原点=map(0,0) → オフセット不要
+    // odomフレーム: 原点=odom(0,0) → map原点のodom座標でオフセット
+    // base_link: 原点=ロボット → ロボットのmap座標でオフセット
+    const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
+    const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
 
     ctx.save();
     ctx.translate(cx, cy);
@@ -315,11 +334,6 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       const { resolution: res, width: mw, height: mh, origin } = mapGrid.info;
       const ox = origin.position.x;
       const oy = origin.position.y;
-      // mapフレーム: 原点=map(0,0) → オフセット不要
-      // odomフレーム: 原点=odom(0,0) → map原点のodom座標でオフセット
-      // base_link: 原点=ロボット → ロボットのmap座標でオフセット
-      const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
-      const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
       const pxPerM = res * s;
       const mapX0 = -(oy + (mh - 1) * res - ref_ry) * s;
       const mapY0 = -(ox - ref_rx) * s;
@@ -335,9 +349,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       const { resolution: res, width: mw, height: mh, origin } = costmapGrid.info;
       const ox = origin.position.x;
       const oy = origin.position.y;
-      // グローバルコストマップはmap座標系: mapフレームと同じオフセット
-      const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
-      const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
+      // グローバルコストマップはmap座標系: mapフレームと同じオフセット(ref_rx/ref_ry)
       const pxPerM = res * s;
       const mapX0 = -(oy + (mh - 1) * res - ref_ry) * s;
       const mapY0 = -(ox - ref_rx) * s;
@@ -471,15 +483,15 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     };
 
     if (goalDraft) {
-      const gx = -goalDraft.y * s;
-      const gy = -goalDraft.x * s;
+      const gx = -(goalDraft.y - ref_ry) * s;
+      const gy = -(goalDraft.x - ref_rx) * s;
       drawGoalArrow(gx, gy, goalDraft.yaw, 0.7);
     }
 
     // initialposeドラフト（黄緑）
     if (poseDraft) {
-      const gx = -poseDraft.y * s;
-      const gy = -poseDraft.x * s;
+      const gx = -(poseDraft.y - ref_ry) * s;
+      const gy = -(poseDraft.x - ref_rx) * s;
       const arrowLen = 30;
       const adx = -Math.sin(poseDraft.yaw) * arrowLen;
       const ady = -Math.cos(poseDraft.yaw) * arrowLen;
@@ -502,8 +514,8 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
 
     // ゴールマーカー（確定済み）
     if (goalPos) {
-      const gx = -goalPos.y * s;
-      const gy = -goalPos.x * s;
+      const gx = -(goalPos.y - ref_ry) * s;
+      const gy = -(goalPos.x - ref_rx) * s;
       drawGoalArrow(gx, gy, goalPos.yaw, 1.0);
       // ロボットからゴールへの点線
       ctx.setLineDash([4, 4]);
@@ -515,12 +527,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     // プラン描画ヘルパー (plan は常にmapフレーム座標)
     const drawPath = (path: Path, color: string, lineWidth: number) => {
       if (path.poses.length < 2) return;
-      // plan は map 座標系
-      // mapフレーム: 原点=map(0,0) → オフセット不要
-      // odomフレーム: 原点=odom(0,0) → map→odom近似でオフセット
-      // base_link: 原点=ロボット → ロボットmap座標でオフセット
-      const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
-      const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
+      // plan は map 座標系 → ref_rx/ref_ry でオフセット
       ctx.strokeStyle = color;
       ctx.lineWidth = lineWidth;
       ctx.lineJoin = 'round';
@@ -539,9 +546,6 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     }
 
     // rooms / places (map frame)
-    const ref_rx = inMapFrame ? 0 : inOdomFrame ? (robot_map_x - robot_odom_x) : robot_map_x;
-    const ref_ry = inMapFrame ? 0 : inOdomFrame ? (robot_map_y - robot_odom_y) : robot_map_y;
-
     if (rooms && rooms.length > 0) {
       rooms.forEach((room, idx) => {
         if (!room.points || room.points.length < 3) return;
@@ -600,14 +604,30 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     ctx.restore();
   }, [scan, markers, doa, odom, mapTf, mapOdomTf, mapGrid, costmapGrid, localCostmapGrid, globalPlan, localPlan, frame, layers, view, width, height, boyIconImg, iconReady, goalPos, goalDraft, poseDraft, places, rooms]);
 
-  // canvas上のピクセル座標 → ROS座標変換
+  // 表示フレーム原点のmap座標オフセット (描画側のref_rx/ref_ryと同一定義)
+  const frameToMapOffset = () => {
+    const f = frameRef.current;
+    if (f === 'map') return { x: 0, y: 0 };
+    const rmx = mapTfRef.current?.translation.x ?? 0;
+    const rmy = mapTfRef.current?.translation.y ?? 0;
+    if (f === 'odom') {
+      const rox = odomRef.current?.pose.pose.position.x ?? 0;
+      const roy = odomRef.current?.pose.pose.position.y ?? 0;
+      return { x: rmx - rox, y: rmy - roy };
+    }
+    return { x: rmx, y: rmy };
+  };
+
+  // canvas上のピクセル座標 → map座標変換
+  // (goal/initialposeはframe_id:'map'でpublishされるため、表示フレームによらずmap座標を返す)
   const canvasToRos = (px: number, py: number, rect: DOMRect) => {
     const v = viewRef.current;
+    const { width: w, height: h } = sizeRef.current;
     const BASE_RANGE = 3;
-    const baseScale = Math.min(width, height) / 2 / BASE_RANGE;
+    const baseScale = Math.min(w, h) / 2 / BASE_RANGE;
     const s = baseScale * v.scale;
-    const cx = width / 2 + v.offsetX;
-    const cy = height / 2 + v.offsetY;
+    const cx = w / 2 + v.offsetX;
+    const cy = h / 2 + v.offsetY;
     const dx = (px - rect.left) - cx;
     const dy = (py - rect.top) - cy;
     // 回転を逆に戻す
@@ -615,7 +635,8 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     const sin_r = Math.sin(-v.rotation);
     const lx = dx * cos_r - dy * sin_r;
     const ly = dx * sin_r + dy * cos_r;
-    return { rosX: -ly / s, rosY: -lx / s };
+    const off = frameToMapOffset();
+    return { rosX: -ly / s + off.x, rosY: -lx / s + off.y };
   };
 
   useEffect(() => {
