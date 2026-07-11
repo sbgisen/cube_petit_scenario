@@ -77,7 +77,10 @@ LAUNCH_COMMANDS = {
     # demo: 02_DEMO_VISION 相当。プロンプトは PROMPT_DIR の .active_prompt が指すファイル
     # (lt_demo_prompt.txt は slides 側へのsymlink)。視覚(infer_object)+Web検索(gpt_chat)を有効化
     'demo': [
-        'ros2', 'launch', 'cube_petit_scenario', 'cube_petit_talk_demo.launch.py',
+        'ros2',
+        'launch',
+        'cube_petit_scenario',
+        'cube_petit_talk_demo.launch.py',
         f'setting_file:={PROMPT_DIR}/lt_demo_prompt.txt',
         "gpt_tool_names:=['gpt_chat', 'infer_object']",
         ('gpt_tools.infer_object.setting_path:=/home/cube-petit/ros/install/cube_petit_chat/'
