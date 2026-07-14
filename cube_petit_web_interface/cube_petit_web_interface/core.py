@@ -74,14 +74,17 @@ processes: dict[str, Optional[subprocess.Popen]] = {
 LAUNCH_COMMANDS = {
     'rosbridge': ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml'],
     'bringup': ['ros2', 'launch', 'cube_petit_bringup', 'cube_petit_bringup.launch.py'],
-    # demo: 02_DEMO_VISION 相当。プロンプトは PROMPT_DIR の .active_prompt が指すファイル
-    # (lt_demo_prompt.txt は slides 側へのsymlink)。視覚(infer_object)+Web検索(gpt_chat)を有効化
+    # demo: 02_DEMO_VISION 相当(ターミナルのaliasと引数を一致させること)。プロンプトは
+    # PROMPT_DIR の .active_prompt が指すファイル (lt_demo_prompt.txt は slides 側へのsymlink)。
+    # tool_names は launch デフォルトに change_expression を足したもの。視覚(infer_object)+
+    # Web検索(gpt_chat)を有効化 (Keep args in sync with the 02_DEMO_VISION shell alias.)
     'demo': [
         'ros2',
         'launch',
         'cube_petit_scenario',
         'cube_petit_talk_demo.launch.py',
         f'setting_file:={PROMPT_DIR}/lt_demo_prompt.txt',
+        "tool_names:=['horoscope', 'weather', 'memory_voice', 'memory_name', 'change_expression']",
         "gpt_tool_names:=['gpt_chat', 'infer_object']",
         ('gpt_tools.infer_object.setting_path:=/home/cube-petit/ros/install/cube_petit_chat/'
          'share/cube_petit_chat/config/gpt_tools/infer_object/infer_object.txt'),
