@@ -18,12 +18,14 @@ rclpy の import はすべて関数内で行い、ROS 環境なしでもこの�
 import できる（テストで app を import 可能にするため）。
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 import math
 import os
 from pathlib import Path
 import subprocess
 import threading
+import time
 from typing import AsyncIterator, Callable, Optional, TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -39,6 +41,32 @@ except ImportError:
     import helpers  # noqa: F401  (routers から core.helpers として参照される)
 
 ROS_ENV = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp'}
+
+# `ros2 node list` は数秒かかることがあるためイベントループ上で実行してはならない。
+# 複数タブ/接続からのポーリングが同時に来ても CLI 呼び出しを1本に共有する。
+# (`ros2 node list` can take seconds; never run it on the event loop, and share
+# one CLI invocation across concurrent polls.)
+_node_list_lock: Optional[asyncio.Lock] = None
+_node_list_cache: tuple[float, str] = (0.0, '')
+NODE_LIST_TTL = 3.0
+
+
+async def get_node_list_output() -> str:
+    """Return `ros2 node list` stdout, cached for NODE_LIST_TTL seconds."""
+    global _node_list_lock, _node_list_cache
+    if _node_list_lock is None:
+        _node_list_lock = asyncio.Lock()
+    async with _node_list_lock:
+        if time.monotonic() - _node_list_cache[0] < NODE_LIST_TTL:
+            return _node_list_cache[1]
+        result = await asyncio.to_thread(subprocess.run, ['ros2', 'node', 'list'],
+                                         capture_output=True,
+                                         text=True,
+                                         timeout=5,
+                                         env=ROS_ENV)
+        _node_list_cache = (time.monotonic(), result.stdout)
+        return result.stdout
+
 
 MAP_BASE_DIR = Path('/home/cube-petit/ros/src/cube_petit_ros/cube_petit_navigation/map')
 MAP_EXTRA_DIR = Path('/home/cube-petit/map')

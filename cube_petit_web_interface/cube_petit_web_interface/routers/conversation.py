@@ -40,7 +40,8 @@ class ContextRequest(BaseModel):
 @router.get('/ros/conversation/status')
 async def get_conversation_status(namespace: str = 'cube_petit_orange') -> dict:
     try:
-        subprocess.run(
+        await asyncio.to_thread(
+            subprocess.run,
             [
                 'ros2', 'service', 'call', f'/{namespace}/get_realtime_conversation_status', 'std_srvs/srv/Trigger',
                 '{}'
@@ -60,7 +61,8 @@ async def get_conversation_status(namespace: str = 'cube_petit_orange') -> dict:
 async def enable_conversation(namespace: str = 'cube_petit_orange', enable: bool = True) -> dict:
     try:
         val = 'True' if enable else 'False'
-        result = subprocess.run(
+        result = await asyncio.to_thread(
+            subprocess.run,
             [
                 'ros2', 'service', 'call', f'/{namespace}/enable_realtime_conversation', 'std_srvs/srv/SetBool',
                 f'{{data: {val}}}'

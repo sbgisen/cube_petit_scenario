@@ -13,6 +13,7 @@
 # limitations under the License.
 """システム情報 API (/system/devices, /action/exists, /ros/nodes, /ros/robot_pose)."""
 
+import asyncio
 import os
 import re
 import subprocess
@@ -35,7 +36,10 @@ _can_stale: bool = False
 @router.get('/action/exists')
 async def action_exists(name: str) -> dict:
     try:
-        result = subprocess.run(['ros2', 'action', 'list'], capture_output=True, text=True, timeout=3)
+        result = await asyncio.to_thread(subprocess.run, ['ros2', 'action', 'list'],
+                                         capture_output=True,
+                                         text=True,
+                                         timeout=3)
         found = any(name in line for line in result.stdout.splitlines())
         return {'exists': found}
     except Exception:
@@ -48,7 +52,7 @@ async def get_system_devices() -> dict:
 
     # IP (IPv4のみ)
     try:
-        r = subprocess.run(['hostname', '-I'], capture_output=True, text=True, timeout=3)
+        r = await asyncio.to_thread(subprocess.run, ['hostname', '-I'], capture_output=True, text=True, timeout=3)
         result['ip'] = [ip for ip in r.stdout.strip().split() if ':' not in ip]
     except Exception:
         result['ip'] = []
@@ -56,7 +60,10 @@ async def get_system_devices() -> dict:
     # CAN0 ネットワークインターフェース + 受信統計
     global _can_prev_rx, _can_stale
     try:
-        r = subprocess.run(['ip', '-s', 'link', 'show', 'can0'], capture_output=True, text=True, timeout=3)
+        r = await asyncio.to_thread(subprocess.run, ['ip', '-s', 'link', 'show', 'can0'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=3)
         up = r.returncode == 0 and 'UP' in r.stdout
         result['can0'] = up
         if up:
@@ -82,7 +89,7 @@ async def get_system_devices() -> dict:
 
     # USB接続（lsusb）
     try:
-        r = subprocess.run(['lsusb'], capture_output=True, text=True, timeout=5)
+        r = await asyncio.to_thread(subprocess.run, ['lsusb'], capture_output=True, text=True, timeout=5)
         lines = r.stdout.splitlines()
         result['realsense'] = any('8086:0b' in line or 'RealSense' in line for line in lines)
         result['oak'] = any('03e7:' in line or 'Movidius' in line or 'Myriad' in line for line in lines)
@@ -96,8 +103,8 @@ async def get_system_devices() -> dict:
 @router.get('/ros/nodes')
 async def get_ros_nodes() -> dict:
     try:
-        result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=5, env=core.ROS_ENV)
-        nodes = [n.strip() for n in result.stdout.splitlines() if n.strip()]
+        node_output = await core.get_node_list_output()
+        nodes = [n.strip() for n in node_output.splitlines() if n.strip()]
         return {'nodes': nodes}
     except Exception as e:
         return {'nodes': [], 'error': str(e)}

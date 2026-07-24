@@ -23,7 +23,9 @@ interface Props {
 
 // rosbridge越しの常時subscribeは重いため、ボタンで明示的にONにした時だけ購読する。
 // OFFにする・アンマウントする際は useRosTopic 側のクリーンアップで必ずunsubscribeされる。
-const CAMERA_THROTTLE_MS = 200; // 約5fps。表示用途としては十分
+// 約1fps。会場WiFiの実効帯域が細い(2026-07-14撮影時 ~0.5Mbps)ため控えめに。
+// 帯域に余裕がある環境なら200(5fps)まで戻してよい
+const CAMERA_THROTTLE_MS = 1000;
 
 export function CameraView({ ros, namespace, enabled, height = 200, flex = false, fitWidth = false,
                              toggleable = false }: Props) {

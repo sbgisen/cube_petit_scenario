@@ -15,6 +15,7 @@
 # limitations under the License.
 
 import os
+import socket
 import sys
 
 from launch import LaunchDescription
@@ -36,6 +37,18 @@ from launch_ros.substitutions import FindPackageShare  # realtime_chat/leg_detec
 # package into a full Python package.
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from respeaker_usb_detect import is_respeaker_connected  # noqa: E402
+
+
+def detect_host_address() -> str:
+    """Return this machine's primary IPv4 address (fallback: 127.0.0.1 when offline)."""
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+            # UDP connect sends no packet; it only asks the kernel which
+            # local address would be used to reach an external host.
+            sock.connect(('8.8.8.8', 80))
+            return sock.getsockname()[0]
+    except OSError:
+        return '127.0.0.1'
 
 
 def launch_setup(context: LaunchContext, *args, **kwargs) -> list:
@@ -70,7 +83,9 @@ def launch_setup(context: LaunchContext, *args, **kwargs) -> list:
 def generate_launch_description() -> LaunchDescription:
     args = [
         DeclareLaunchArgument('robot', default_value='cube_petit_orange', description='Robot namespace.'),
-        DeclareLaunchArgument('address', default_value='192.168.8.107', description='Display server address.'),
+        DeclareLaunchArgument('address',
+                              default_value=detect_host_address(),
+                              description='Display server address (auto-detected primary IP by default).'),
         DeclareLaunchArgument('certfile', default_value='/home/cube-petit/mycert.pem', description='SSL cert file.'),
         DeclareLaunchArgument('keyfile', default_value='/home/cube-petit/mykey.pem', description='SSL key file.'),
         DeclareLaunchArgument(
