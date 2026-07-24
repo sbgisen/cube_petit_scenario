@@ -8,5 +8,9 @@ export default defineConfig({
     port: 5173,
     strictPort: true,
     host: true,
+    // Leading-dot entries match any hostname ending in that suffix, so this
+    // covers every individual (cube-petit-orange.local, cube-petit-pink.local,
+    // ...) without hardcoding one robot's name into a shared source tree.
+    allowedHosts: ['.local'],
   },
 })
