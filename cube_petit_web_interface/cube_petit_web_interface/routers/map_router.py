@@ -120,7 +120,7 @@ async def add_map_place(body: MapPlaceBody) -> dict:
 async def add_map_place_current(map_name: str,
                                 name: str,
                                 category: str = 'patrol',
-                                namespace: str = 'cube_petit_orange') -> dict:
+                                namespace: str = core.DEFAULT_NAMESPACE) -> dict:
     pose = core.get_robot_pose(namespace)
     if pose is None:
         return {'ok': False, 'error': 'Cannot get robot position from TF'}
@@ -212,7 +212,7 @@ async def preview_map() -> dict:
             str(dest),
             '--ros-args',
             '-r',
-            'map:=/cube_petit_orange/navigation/map',
+            f'map:=/{core.DEFAULT_NAMESPACE}/navigation/map',
         ]
         try:
             subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=core.ROS_ENV)
@@ -246,7 +246,7 @@ async def save_map(body: MapSaveBody) -> dict:
         dest_stem,
         '--ros-args',
         '-r',
-        'map:=/cube_petit_orange/navigation/map',
+        f'map:=/{core.DEFAULT_NAMESPACE}/navigation/map',
     ]
     try:
         result = subprocess.run(cmd, capture_output=True, text=True, timeout=15, env=core.ROS_ENV)
@@ -360,7 +360,7 @@ async def reorder_map_places(body: PlacesReorderBody) -> dict:
 
 
 @router.post('/map/initial_pose')
-async def set_initial_pose(x: float, y: float, yaw: float, namespace: str = 'cube_petit_orange') -> dict:
+async def set_initial_pose(x: float, y: float, yaw: float, namespace: str = core.DEFAULT_NAMESPACE) -> dict:
     qz = math.sin(yaw / 2)
     qw = math.cos(yaw / 2)
     msg = (f'{{header: {{frame_id: map}}, pose: {{pose: {{'

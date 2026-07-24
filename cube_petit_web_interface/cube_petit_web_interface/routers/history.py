@@ -42,7 +42,7 @@ async def list_history() -> dict:
 
 
 @router.post('/history/activate')
-async def activate_history(file: str, namespace: str = 'cube_petit_orange') -> dict:
+async def activate_history(file: str, namespace: str = core.DEFAULT_NAMESPACE) -> dict:
     path = core.HISTORY_DIR / file
     if not path.exists():
         core.HISTORY_DIR.mkdir(parents=True, exist_ok=True)

@@ -83,7 +83,10 @@ HISTORY_ACTIVE_MARKER = HISTORY_DIR / '.active_history'
 PROTECTED_HISTORY = {'history.jsonl'}
 
 # rclpy 常駐ノード
-WATCHED_NAMESPACES = ['cube_petit_orange']
+# hostname (cube_petit_<color>) から動的に導出する。cube_petit_bringup.launch.py の
+# face_color 導出と同じ発想（PR #102参照）。routers 側のデフォルト値もここから参照する。
+DEFAULT_NAMESPACE = helpers.resolve_namespace()
+WATCHED_NAMESPACES = [DEFAULT_NAMESPACE]
 status_cache: dict[str, dict] = {ns: {'is_active': False, 'can_receive_message': False} for ns in WATCHED_NAMESPACES}
 _node: Optional['Node'] = None
 _tf_buffer = None

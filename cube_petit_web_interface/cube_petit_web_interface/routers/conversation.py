@@ -38,7 +38,7 @@ class ContextRequest(BaseModel):
 
 
 @router.get('/ros/conversation/status')
-async def get_conversation_status(namespace: str = 'cube_petit_orange') -> dict:
+async def get_conversation_status(namespace: str = core.DEFAULT_NAMESPACE) -> dict:
     try:
         await asyncio.to_thread(
             subprocess.run,
@@ -58,7 +58,7 @@ async def get_conversation_status(namespace: str = 'cube_petit_orange') -> dict:
 
 
 @router.post('/ros/conversation/enable')
-async def enable_conversation(namespace: str = 'cube_petit_orange', enable: bool = True) -> dict:
+async def enable_conversation(namespace: str = core.DEFAULT_NAMESPACE, enable: bool = True) -> dict:
     try:
         val = 'True' if enable else 'False'
         result = await asyncio.to_thread(
@@ -119,7 +119,7 @@ def _call_add_context_sync(namespace: str, req_body: ContextRequest) -> bool:
 
 
 @router.post('/ros/conversation/context')
-async def add_context(namespace: str = 'cube_petit_orange', body: ContextRequest = ContextRequest()) -> dict:
+async def add_context(namespace: str = core.DEFAULT_NAMESPACE, body: ContextRequest = ContextRequest()) -> dict:
     try:
         ok = await asyncio.get_event_loop().run_in_executor(None, _call_add_context_sync, namespace, body)
         return {'ok': ok}

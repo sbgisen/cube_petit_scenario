@@ -20,6 +20,7 @@ rclpy / FastAPI に依存しないため、素の Python 環境で単体テス�
 import io
 from pathlib import Path
 import re
+import socket
 from typing import Optional
 
 from PIL import Image
@@ -31,6 +32,24 @@ import yaml
 def parse_amixer_volume(output: str) -> int:
     m = re.search(r'\[(\d+)%\]', output)
     return int(m.group(1)) if m else -1
+
+
+# --- 名前空間 (hostname -> cube_petit_<color>) ---
+
+DEFAULT_NAMESPACE = 'cube_petit_orange'
+
+
+def resolve_namespace(hostname: Optional[str] = None) -> str:
+    """ホスト名から ROS 名前空間 (例: 'cube_petit_pink') を導く.
+
+    各個体は cube_petit_<color> という hostname を持つ運用のため、そのまま
+    名前空間として使える（cube_petit_bringup.launch.py の face_color 導出と
+    同じ発想だが、こちらは色名を剥がさず完全な名前空間文字列を返す）。
+    その命名規則に沿わないホスト（開発機など）では DEFAULT_NAMESPACE にフォールバックする。
+    """
+    hostname = hostname if hostname is not None else socket.gethostname()
+    namespace = hostname.replace('-', '_')
+    return namespace if namespace.startswith('cube_petit_') else DEFAULT_NAMESPACE
 
 
 # --- ポイント (places.yaml) ---
