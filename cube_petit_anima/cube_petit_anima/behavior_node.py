@@ -52,6 +52,8 @@ class BehaviorNode(Node):
         self.speak_cooldown = 180.0  # 3分
         self.se_cooldown = 60.0
         self.last_se_time = 0.0
+        # Sound effects are opt-in: enabled only via the `sound:=true` launch argument.
+        self.sound_enabled = (self.declare_parameter('sound_enabled', False).get_parameter_value().bool_value)
 
         self.motion_timer = self.create_timer(0.1, self.update_motion)
 
@@ -59,6 +61,15 @@ class BehaviorNode(Node):
         if not config_se_path:
             raise RuntimeError('config_se_path parameter not set')
         self.se = SEPlayer(config_se_path)
+
+    # ==================================
+    # Sound Effect
+    # ==================================
+    def play_se(self, state_name: str) -> None:
+        """Play a sound effect only when enabled by the launch argument."""
+        if not self.sound_enabled:
+            return
+        self.se.play(state_name)
 
     # ==================================
     # State Callback
@@ -75,7 +86,7 @@ class BehaviorNode(Node):
                 state.boredom > behavior_logic.BOREDOM_HIGH_THRESHOLD):
             if (now - self.last_se_time) > self.se_cooldown:
                 self.get_logger().info('play SE: 喜び')
-                self.se.play('感情：興味')
+                self.play_se('感情：興味')
                 self.last_se_time = now
 
         # --- 状態変化検出 ---
@@ -83,13 +94,13 @@ class BehaviorNode(Node):
             self.get_logger().info('Wake up')
             # 起きた音
             self.get_logger().info('play SE: スリープ解除')
-            self.se.play('スリープ解除')
+            self.play_se('スリープ解除')
             self.last_speak_time = now
 
         if prev_swing and not self.swing_active:
             self.get_logger().info('Sleep')
             self.get_logger().info('play SE: スリープ移行')
-            self.se.play('スリープ移行')
+            self.play_se('スリープ移行')
             self.last_speak_time = now
 
         # --- Speak ---

@@ -119,8 +119,7 @@ async def kill_all_ros() -> dict:
 @router.get('/launch/status')
 async def get_status() -> dict:
     try:
-        result = subprocess.run(['ros2', 'node', 'list'], capture_output=True, text=True, timeout=5, env=core.ROS_ENV)
-        node_output = result.stdout
+        node_output = await core.get_node_list_output()
         status = {}
         for target, marker in core.LAUNCH_NODE_MARKERS.items():
             proc_alive = core.processes[target] is not None and core.processes[target].poll() is None

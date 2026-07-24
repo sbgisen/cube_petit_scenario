@@ -4,6 +4,7 @@ import { CameraView } from './CameraView';
 import { AnimaPanel } from './AnimaPanel';
 import { ConversationPanel } from './ConversationPanel';
 import { QuickPhraseGrid } from './QuickPhraseGrid';
+import { ExpressionGrid } from './ExpressionGrid';
 import { useRosAction } from '../hooks/useRosAction';
 import { useSpeechServerAlive } from '../hooks/useRosNodeAlive';
 
@@ -22,6 +23,14 @@ export function TalkTab({ ros, namespace, quickPhrases, setQuickPhrases, apiUrl 
   void useSpeechServerAlive(namespace);
 
   const [isActive, setIsActive] = useState(false);
+
+  // Left-column grid selector: quick phrases or expression grid (persisted for e.g. photo shoots).
+  const [leftTab, setLeftTab] = useState<'phrase' | 'expression'>(
+    () => (localStorage.getItem('talk_left_tab') === 'expression' ? 'expression' : 'phrase'));
+  const switchLeftTab = (t: 'phrase' | 'expression') => {
+    setLeftTab(t);
+    localStorage.setItem('talk_left_tab', t);
+  };
 
   useEffect(() => {
     const poll = () => {
@@ -47,10 +56,30 @@ export function TalkTab({ ros, namespace, quickPhrases, setQuickPhrases, apiUrl 
 
   return (
     <div style={{ display: 'flex', gap: 12, height: '100%', overflow: 'hidden' }}>
-      {/* 左: カメラ + クイックフレーズ + Anima + 会話トグル */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 320, flexShrink: 0, overflowY: 'auto' }}>
-        <CameraView ros={ros} namespace={namespace} enabled toggleable height={200} />
-        <QuickPhraseGrid phrases={quickPhrases} onSpeak={speak} onAdd={addPhrase} speechAvailable={true} />
+      {/* 左: カメラ + (フレーズ/表情 切り替え) はスクロール、下段(Anima + 会話トグル)は固定 */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: 320, flexShrink: 0, overflow: 'hidden' }}>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 10 }}>
+          <CameraView ros={ros} namespace={namespace} enabled toggleable height={200} />
+          <div style={{ display: 'flex', gap: 4, background: 'var(--t-surface)', borderRadius: 10, padding: 3, flexShrink: 0 }}>
+            {(['phrase', 'expression'] as const).map((t) => (
+              <button
+                key={t}
+                onClick={() => switchLeftTab(t)}
+                style={{
+                  flex: 1, padding: '6px 0', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12,
+                  background: leftTab === t ? 'var(--t-surface2)' : 'transparent',
+                  color: leftTab === t ? 'var(--t-text)' : 'var(--t-text-dim)',
+                  fontWeight: leftTab === t ? 'bold' : 'normal',
+                }}
+              >
+                {t === 'phrase' ? 'フレーズ' : '表情'}
+              </button>
+            ))}
+          </div>
+          {leftTab === 'phrase'
+            ? <QuickPhraseGrid phrases={quickPhrases} onSpeak={speak} onAdd={addPhrase} speechAvailable={true} />
+            : <ExpressionGrid ros={ros} namespace={namespace} />}
+        </div>
         <AnimaPanel ros={ros} namespace={namespace} />
         <button
           onClick={toggleConversation}

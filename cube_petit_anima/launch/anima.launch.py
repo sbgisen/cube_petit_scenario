@@ -50,15 +50,21 @@ def generate_launch_description() -> LaunchDescription:
                                                 default_value='4.0',
                                                 description='Amplitude [rad/s] of the swing angular.z command.')
 
+    sound_arg = DeclareLaunchArgument('sound',
+                                      default_value='false',
+                                      description='Enable sound effect (SE) playback of behavior_node.')
+
     use_sim_time = LaunchConfiguration('use_sim_time')
     swing_enabled = LaunchConfiguration('swing')
     swing_amplitude = LaunchConfiguration('swing_amplitude')
+    sound_enabled = LaunchConfiguration('sound')
 
     return LaunchDescription([
         use_sim_time_arg,
         robot_arg,
         swing_arg,
         swing_amplitude_arg,
+        sound_arg,
         PushRosNamespace(LaunchConfiguration('robot')),
         Node(package=package_name,
              executable='internal_state_node',
@@ -82,7 +88,8 @@ def generate_launch_description() -> LaunchDescription:
                      'use_sim_time': use_sim_time,
                      'config_se_path': config_se_path,
                      'swing_enabled': swing_enabled,
-                     'swing_amplitude': swing_amplitude
+                     'swing_amplitude': swing_amplitude,
+                     'sound_enabled': sound_enabled
                  }
              ],
              output='screen'),

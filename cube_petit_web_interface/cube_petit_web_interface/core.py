@@ -18,12 +18,14 @@ rclpy の import はすべて関数内で行い、ROS 環境なしでもこの�
 import できる（テストで app を import 可能にするため）。
 """
 
+import asyncio
 from contextlib import asynccontextmanager
 import math
 import os
 from pathlib import Path
 import subprocess
 import threading
+import time
 from typing import AsyncIterator, Callable, Optional, TYPE_CHECKING
 
 from fastapi import FastAPI
@@ -39,6 +41,32 @@ except ImportError:
     import helpers  # noqa: F401  (routers から core.helpers として参照される)
 
 ROS_ENV = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp'}
+
+# `ros2 node list` は数秒かかることがあるためイベントループ上で実行してはならない。
+# 複数タブ/接続からのポーリングが同時に来ても CLI 呼び出しを1本に共有する。
+# (`ros2 node list` can take seconds; never run it on the event loop, and share
+# one CLI invocation across concurrent polls.)
+_node_list_lock: Optional[asyncio.Lock] = None
+_node_list_cache: tuple[float, str] = (0.0, '')
+NODE_LIST_TTL = 3.0
+
+
+async def get_node_list_output() -> str:
+    """Return `ros2 node list` stdout, cached for NODE_LIST_TTL seconds."""
+    global _node_list_lock, _node_list_cache
+    if _node_list_lock is None:
+        _node_list_lock = asyncio.Lock()
+    async with _node_list_lock:
+        if time.monotonic() - _node_list_cache[0] < NODE_LIST_TTL:
+            return _node_list_cache[1]
+        result = await asyncio.to_thread(subprocess.run, ['ros2', 'node', 'list'],
+                                         capture_output=True,
+                                         text=True,
+                                         timeout=5,
+                                         env=ROS_ENV)
+        _node_list_cache = (time.monotonic(), result.stdout)
+        return result.stdout
+
 
 MAP_BASE_DIR = Path('/home/cube-petit/ros/src/cube_petit_ros/cube_petit_navigation/map')
 MAP_EXTRA_DIR = Path('/home/cube-petit/map')
@@ -74,14 +102,17 @@ processes: dict[str, Optional[subprocess.Popen]] = {
 LAUNCH_COMMANDS = {
     'rosbridge': ['ros2', 'launch', 'rosbridge_server', 'rosbridge_websocket_launch.xml'],
     'bringup': ['ros2', 'launch', 'cube_petit_bringup', 'cube_petit_bringup.launch.py'],
-    # demo: 02_DEMO_VISION 相当。プロンプトは PROMPT_DIR の .active_prompt が指すファイル
-    # (lt_demo_prompt.txt は slides 側へのsymlink)。視覚(infer_object)+Web検索(gpt_chat)を有効化
+    # demo: 02_DEMO_VISION 相当(ターミナルのaliasと引数を一致させること)。プロンプトは
+    # PROMPT_DIR の .active_prompt が指すファイル (lt_demo_prompt.txt は slides 側へのsymlink)。
+    # tool_names は launch デフォルトに change_expression を足したもの。視覚(infer_object)+
+    # Web検索(gpt_chat)を有効化 (Keep args in sync with the 02_DEMO_VISION shell alias.)
     'demo': [
         'ros2',
         'launch',
         'cube_petit_scenario',
         'cube_petit_talk_demo.launch.py',
         f'setting_file:={PROMPT_DIR}/lt_demo_prompt.txt',
+        "tool_names:=['horoscope', 'weather', 'memory_voice', 'memory_name', 'change_expression']",
         "gpt_tool_names:=['gpt_chat', 'infer_object']",
         ('gpt_tools.infer_object.setting_path:=/home/cube-petit/ros/install/cube_petit_chat/'
          'share/cube_petit_chat/config/gpt_tools/infer_object/infer_object.txt'),

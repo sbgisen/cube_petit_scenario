@@ -34,7 +34,6 @@ setup(
         (f'share/{package_name}/config', glob.glob('./config/*.md')),
         (f'share/{package_name}/config', glob.glob('./config/*.py')),
         (f'share/{package_name}/config', glob.glob('./config/*.yaml')),
-        (f'share/{package_name}', ['pyproject.toml']),
     ],
     maintainer='gisen',
     maintainer_email='SBGRP-git@g.softbank.co.jp',
