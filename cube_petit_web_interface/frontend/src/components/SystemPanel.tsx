@@ -1,16 +1,23 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 
-const WATCHED_NODES = [
-  'ldlidar_publisher_ld06',
-  'diff_drive_controller',
-  'socket_can_receiver',
-  'socket_can_sender',
-  'speech_action_server',
-  'text_to_jtalk',
-  'realtime_gpt_chat',
-  'respeaker_node',
-  'robot_state_publisher',
+// launch/statusのターゲット(bringup/demo/...)ごとに、健全性チェック対象ノードを分けて表示する
+const WATCHED_NODE_GROUPS: { label: string; nodes: string[] }[] = [
+  {
+    label: 'bringup',
+    nodes: [
+      'robot_state_publisher',
+      'ldlidar_publisher_ld06',
+      'diff_drive_controller',
+      'socket_can_receiver',
+      'socket_can_sender',
+      'respeaker_node',
+    ],
+  },
+  {
+    label: 'demo',
+    nodes: ['realtime_gpt_chat', 'speech_action_server', 'text_to_jtalk'],
+  },
 ];
 
 interface DeviceStatus {
@@ -205,7 +212,7 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gridTemplateRows: '1fr 1fr', gap: 16, padding: 8, height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gridTemplateRows: '2fr 1fr', gap: 16, padding: 8, height: '100%', overflow: 'hidden' }}>
 
       {/* 起動管理: 左上 2列 */}
       <div style={{ ...cardStyle, gridColumn: '1 / 3', gridRow: '1' }}>
@@ -296,15 +303,15 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
       </div>
 
       {/* デバイス: 左下 1列 */}
-      <div style={{ ...cardStyle, gridColumn: '1 / 2', gridRow: '2' }}>
+      <div style={{ ...cardStyle, gridColumn: '1 / 2', gridRow: '2', overflow: 'auto' }}>
         <SectionTitle>デバイス</SectionTitle>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 7 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
           {devices && (
-            <div style={{ color: 'var(--t-text-dim)', fontSize: 11, marginBottom: 4 }}>
+            <div style={{ color: 'var(--t-text-dim)', fontSize: 11 }}>
               {devices.ip.join('  ')}
             </div>
           )}
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexWrap: 'wrap' }}>
             <Dot ok={devices?.can0 ?? false} />
             <span style={{ color: 'var(--t-text)', fontSize: 13 }}>CAN0</span>
             {devices?.can0 && devices?.can_stale && (
@@ -329,22 +336,31 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
               {canRestarting ? '再起動中...' : 'CAN再起動'}
             </button>
           </div>
-          <DeviceRow label="LiDAR"     ok={devices?.lidar     ?? false} />
-          <DeviceRow label="IMU"       ok={devices?.imu       ?? false} />
-          <DeviceRow label="CANable"   ok={devices?.canable   ?? false} />
-          <DeviceRow label="RealSense" ok={devices?.realsense ?? false} />
-          <DeviceRow label="OAK"       ok={devices?.oak       ?? false} />
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px' }}>
+            <DeviceRow label="LiDAR"     ok={devices?.lidar     ?? false} />
+            <DeviceRow label="IMU"       ok={devices?.imu       ?? false} />
+            <DeviceRow label="CANable"   ok={devices?.canable   ?? false} />
+            <DeviceRow label="RealSense" ok={devices?.realsense ?? false} />
+            <DeviceRow label="OAK"       ok={devices?.oak       ?? false} />
+          </div>
         </div>
       </div>
 
-      {/* ノード監視: デバイスの右 3列 */}
-      <div style={{ ...cardStyle, gridColumn: '2 / 5', gridRow: '2' }}>
+      {/* ノード監視: デバイスの右 3列。launchターゲット(bringup/demo/...)ごとにグループ表示 */}
+      <div style={{ ...cardStyle, gridColumn: '2 / 5', gridRow: '2', overflow: 'auto' }}>
         <SectionTitle>ノード監視 <span style={{ fontSize: 11, color: 'var(--t-text-dim)', fontWeight: 'normal' }}>({namespace})</span></SectionTitle>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: '6px 24px' }}>
-          {WATCHED_NODES.map(node => (
-            <div key={node} style={{ display: 'flex', alignItems: 'center', gap: 8, minWidth: 200 }}>
-              <Dot ok={isAlive(node)} />
-              <span style={{ color: 'var(--t-text)', fontSize: 13 }}>{node}</span>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+          {WATCHED_NODE_GROUPS.map(group => (
+            <div key={group.label} style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
+              <span style={{ fontSize: 11, color: 'var(--t-text-dim)', minWidth: 56, flexShrink: 0 }}>{group.label}</span>
+              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px' }}>
+                {group.nodes.map(node => (
+                  <div key={node} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Dot ok={isAlive(node)} />
+                    <span style={{ color: 'var(--t-text)', fontSize: 12 }}>{node}</span>
+                  </div>
+                ))}
+              </div>
             </div>
           ))}
         </div>
