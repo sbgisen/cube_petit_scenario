@@ -222,6 +222,17 @@ def get_fleet_error() -> Optional[str]:
     return _fleet_error
 
 
+def send_fleet_command(robot_name: str, method: str, args: dict) -> str:
+    """フリート内の(自分以外でもよい)ロボットへコマンドを送る（例: move_to_pose）.
+
+    Raises:
+        RuntimeError: フリート監視(zenoh)が起動していない場合。
+    """
+    if _fleet_watcher is None:
+        raise RuntimeError('Fleet zenoh watcher is not running (Tier 2 unavailable)')
+    return _fleet_watcher.send_command(robot_name, method, args)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_ros_thread()

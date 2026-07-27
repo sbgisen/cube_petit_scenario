@@ -5,6 +5,7 @@ import { TalkTab } from './components/TalkTab';
 import { SystemPanel } from './components/SystemPanel';
 import { CustomTab } from './components/CustomTab';
 import { MapTab } from './components/MapTab';
+import { FleetDashboard } from './components/FleetDashboard';
 import { RobotPicker, nicknameForRobot, colorForRobot } from './components/RobotPicker';
 import { Icon } from './components/Icon';
 import type { RobotConfig } from './types/ros';
@@ -92,7 +93,7 @@ function pushHostHistory(prev: string[], host: string): string[] {
   return next;
 }
 
-type Tab = 'operation' | 'talk' | 'map' | 'system' | 'custom';
+type Tab = 'operation' | 'talk' | 'map' | 'system' | 'custom' | 'fleet';
 
 // UI(チュームまわり: ボタン・ラベル・メニュー)のみの言語切替。会話タブのやり取り内容や
 // クイックフレーズ等の「会話内容」は対象外(常に日本語のまま)。
@@ -118,6 +119,7 @@ const STRINGS = {
     tabSystem: 'システム',
     tabCustom: 'カスタム会話',
     tabMap: 'カスタムマップ',
+    tabFleet: 'フリート運用',
   },
   en: {
     settings: 'Settings',
@@ -134,6 +136,7 @@ const STRINGS = {
     tabSystem: 'System',
     tabCustom: 'Custom Talk',
     tabMap: 'Custom Map',
+    tabFleet: 'Fleet Ops',
   },
 } as const satisfies Record<UiLang, Record<string, string>>;
 
@@ -143,6 +146,7 @@ const TABS: { id: Tab; labelKey: keyof typeof STRINGS['ja'] }[] = [
   { id: 'system',    labelKey: 'tabSystem' },
   { id: 'custom',    labelKey: 'tabCustom' },
   { id: 'map',       labelKey: 'tabMap' },
+  { id: 'fleet',     labelKey: 'tabFleet' },
 ];
 
 export default function App() {
@@ -418,6 +422,7 @@ export default function App() {
             {tab === 'system'    && <SystemPanel  namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
             {tab === 'map'       && <MapTab       namespace={robot.namespace} apiUrl={apiUrl} />}
             {tab === 'custom'    && <CustomTab    apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+            {tab === 'fleet'     && <FleetDashboard apiUrl={apiUrl} />}
           </>
         )}
       </div>

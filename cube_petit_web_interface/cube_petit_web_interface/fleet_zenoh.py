@@ -19,8 +19,7 @@ Every CubePetit robot's `cube_petit_fleet_bridge.zenoh_connector` node (a
 separate ROS2 package/repo, `cube_petit_ros`) publishes its own state over a
 plain `eclipse-zenoh` session (independent of ROS_DOMAIN_ID / rmw_zenoh_cpp).
 See `fleet_zenoh_logic.py`'s module docstring for the exact wire format this
-watcher reads, and for why it deliberately ignores `command` /
-`command_is_completed` (read-only fleet *visibility*, not remote control).
+watcher reads/writes.
 
 This module opens its own plain zenoh client session -- symmetric with
 zenoh_connector.py and cube_petit_shared_controller's hub/receiver nodes --
@@ -28,6 +27,13 @@ and subscribes to `robots/*/{pose,battery,map_name}`. Every
 cube_petit_web_interface instance runs one of these, so opening any robot's
 web interface shows the same fleet-wide picture: there is no single "hub"
 instance (symmetric peer design).
+
+`send_command()` additionally lets the dashboard *drive* another robot in the
+fleet (move_to_pose, e.g. "everyone gather here" / chase mode), by writing to
+`robots/<robot>/command` -- the same key `zenoh_connector.py` subscribes to.
+This was deliberately read-only until the ROSConJP 2026 demo (chase-and-greet)
+needed operator-triggered move_to_pose from the dashboard instead of having
+each robot decide autonomously (see plans/cube_petit_fleet_adapter_plan.md).
 
 Kept independent of the cube_petit_fleet_bridge package (different repo:
 cube_petit_ros vs cube_petit_scenario) -- fleet_zenoh_logic.py re-implements
@@ -47,6 +53,7 @@ import json
 import threading
 import time
 import typing
+import uuid
 
 try:
     # uvicorn cube_petit_web_interface.api_server:app で起動した場合
@@ -126,3 +133,32 @@ class FleetZenohWatcher:
             # Copy while holding the lock; build_snapshot() itself needs no lock (pure).
             state_copy = {name: dict(robot) for name, robot in self._state.items()}
         return logic.build_snapshot(state_copy, time.monotonic(), stale_after)
+
+    def send_command(self, robot_name: str, method: str, args: dict) -> str:
+        """Publish a ``robots/<robot_name>/command`` message (fire-and-forget).
+
+        Mirrors the wire format `cube_petit_fleet_bridge.zenoh_connector`'s
+        `_on_zenoh_command` expects: ``{"method", "args", "id"}`` JSON (see
+        `fleet_bridge_logic.parse_command` in the `cube_petit_ros` repo).
+        Completion isn't awaited here -- the dashboard polls `snapshot()`
+        (robot pose moving) rather than `command_is_completed`, since that
+        key isn't part of this watcher's subscriptions.
+
+        Args:
+            robot_name: Target robot namespace, e.g. ``cube_petit_pink``.
+            method: One of the fleet_bridge ``SUPPORTED_METHODS`` (only
+                ``move_to_pose`` is exercised by the dashboard today).
+            args: Method-specific args, e.g. ``{"x", "y", "yaw", "map_name"}``.
+
+        Returns:
+            The generated command id.
+
+        Raises:
+            RuntimeError: If the zenoh session isn't open (watcher not started).
+        """
+        if self._session is None:
+            raise RuntimeError('Fleet zenoh session is not open (watcher not started)')
+        command_id = uuid.uuid4().hex
+        payload = json.dumps({'method': method, 'args': args, 'id': command_id})
+        self._session.put(f'robots/{robot_name}/command', payload)
+        return command_id
