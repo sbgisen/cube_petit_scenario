@@ -6,9 +6,20 @@
 #   1. Python venv(--system-site-packages)を作り、requirements.txt をuvで入れる
 #   2. frontend/ の npm install (node/npmが無ければ apt で入れる)
 #   3. ROS環境をsourceした状態のenvをsystemd用envファイルとして書き出す
-#   4. cube-petit-api.service / cube-petit-frontend.service を生成してenable+start
+#   4. cube-petit-api.service / cube-petit-frontend.service / cube-petit-zenoh-connector.service
+#      (+ hubトポロジ時はcube-petit-zenohd.serviceもorangeでのみ)を生成してenable+start
 #
-# 前提: このリポジトリが ~/ros/src/cube_petit_scenario にcloneされていること。
+# zenohトポロジは環境変数で切替可能:
+#   ZENOH_TOPOLOGY=hub (デフォルト): orangeが `rmw_zenohd` (ROS標準同梱のzenoh router)を
+#     動かし、全機体がclientモードでそこへ接続する。スター型なので会場Wi-Fi等
+#     マルチキャストが通らない環境でも繋がりやすい。
+#   ZENOH_TOPOLOGY=peer: routerを使わず全機体peerモード(マルチキャスト到達性が
+#     良い環境向けのフォールバック。routerが死んでいる/到達不可のときの緊急退避用)。
+#   RUN_ZENOH_ROUTER=1/0: このマシンでrouter自体を動かすか。省略時はhubトポロジかつ
+#     hostnameがcube-petit-orangeの場合のみ自動で1になる。
+#
+# 前提: このリポジトリが ~/ros/src/cube_petit_scenario に、cube_petit_ros(fleet_bridge)が
+# ~/ros/src/cube_petit_ros にcloneされていること。
 set -euo pipefail
 
 REPO_DIR="$HOME/ros/src/cube_petit_scenario"
@@ -17,6 +28,8 @@ FRONTEND_DIR="$WEBIF_DIR/frontend"
 VENV_DIR="$WEBIF_DIR/.venv"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$SYSTEMD_DIR/cube-petit-api.env"
+FLEET_BRIDGE_BUILD_DIR="$HOME/ros/build/cube_petit_fleet_bridge/cube_petit_fleet_bridge"
+ZENOHD_BIN="/opt/ros/jazzy/lib/rmw_zenoh_cpp/rmw_zenohd"
 
 # ROS環境を先にsourceしておく(PYTHONPATHにrclpy等が乗る)。以降のvenv importチェックや
 # 4章のenvファイル生成でも使う。一部のROS setup.bash群がunbound variableを参照するため
@@ -29,13 +42,22 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-94}"
 export DISPLAY="${DISPLAY:-:0}"
-# 現状このLAN上にzenohのrouter(zenohd)は存在しないため、fleet_zenoh watcherは
-# peerモードで動かす(client modeだと"Unable to connect"で/fleet/robotsが
-# available:falseになる。手動foreground起動時はこれをシェルで都度exportしていたため
-# 気づきにくかったが、systemdサービス化した際にenvファイルへ引き継がれておらず
-# 全機体でフリート機能が無効になっていたバグの原因)
-export ZENOH_ROUTER_ENDPOINT="${ZENOH_ROUTER_ENDPOINT:-tcp/cube-petit-orange.local:7447}"
-export ZENOH_MODE="${ZENOH_MODE:-peer}"
+
+ROBOT_NAMESPACE="$(hostname | tr '-' '_')"
+HUB_ENDPOINT="tcp/cube-petit-orange.local:7447"
+ZENOH_TOPOLOGY="${ZENOH_TOPOLOGY:-hub}"   # hub | peer
+if [ "$ZENOH_TOPOLOGY" = "hub" ]; then
+  export ZENOH_MODE=client
+  export ZENOH_ROUTER_ENDPOINT="$HUB_ENDPOINT"
+  DEFAULT_RUN_ROUTER=0
+  [ "$ROBOT_NAMESPACE" = "cube_petit_orange" ] && DEFAULT_RUN_ROUTER=1
+else
+  export ZENOH_MODE=peer
+  export ZENOH_ROUTER_ENDPOINT="$HUB_ENDPOINT"
+  DEFAULT_RUN_ROUTER=0
+fi
+RUN_ZENOH_ROUTER="${RUN_ZENOH_ROUTER:-$DEFAULT_RUN_ROUTER}"
+echo "zenohトポロジ: $ZENOH_TOPOLOGY (このマシンのmode=$ZENOH_MODE, router起動=$RUN_ZENOH_ROUTER, namespace=$ROBOT_NAMESPACE)"
 
 echo "== 1. Python venv + eclipse-zenoh (uv) =="
 if ! command -v uv >/dev/null 2>&1; then
@@ -152,8 +174,50 @@ Environment=PATH=$(dirname "$NPM_BIN"):/usr/local/sbin:/usr/local/bin:/usr/sbin:
 WantedBy=default.target
 EOF
 
+cat > "$SYSTEMD_DIR/cube-petit-zenoh-connector.service" <<EOF
+[Unit]
+Description=Cube Petit Fleet Bridge zenoh connector ($ROBOT_NAMESPACE)
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=$FLEET_BRIDGE_BUILD_DIR
+ExecStart=$VENV_DIR/bin/python $FLEET_BRIDGE_BUILD_DIR/zenoh_connector.py --ros-args -r __node:=zenoh_connector -r __ns:=/$ROBOT_NAMESPACE -p zenoh_router_endpoint:=$ZENOH_ROUTER_ENDPOINT -p zenoh_mode:=$ZENOH_MODE
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=$ENV_FILE
+
+[Install]
+WantedBy=default.target
+EOF
+
+SERVICES_TO_START="cube-petit-api.service cube-petit-frontend.service cube-petit-zenoh-connector.service"
+
+if [ "$RUN_ZENOH_ROUTER" = "1" ]; then
+  cat > "$SYSTEMD_DIR/cube-petit-zenohd.service" <<EOF
+[Unit]
+Description=Cube Petit zenoh router (rmw_zenohd, hubトポロジ用)
+After=network.target
+
+[Service]
+Type=simple
+ExecStart=$ZENOHD_BIN
+Restart=on-failure
+RestartSec=5
+EnvironmentFile=$ENV_FILE
+
+[Install]
+WantedBy=default.target
+EOF
+  SERVICES_TO_START="cube-petit-zenohd.service $SERVICES_TO_START"
+else
+  # peerモードに切り替えた場合や、hubだが役割から外れた場合に古いrouterサービスが
+  # 残らないようにする(既に無ければ何もしない)
+  systemctl --user disable --now cube-petit-zenohd.service 2>/dev/null || true
+fi
+
 systemctl --user daemon-reload
-systemctl --user enable --now cube-petit-api.service cube-petit-frontend.service
+systemctl --user enable --now $SERVICES_TO_START
 sleep 2
-systemctl --user status cube-petit-api.service cube-petit-frontend.service --no-pager -l | grep -E 'Loaded|Active'
+systemctl --user status $SERVICES_TO_START --no-pager -l | grep -E 'Loaded|Active|●'
 echo "== 完了 =="
