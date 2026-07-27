@@ -61,10 +61,14 @@ async def get_node_list_output() -> str:
     async with _node_list_lock:
         if time.monotonic() - _node_list_cache[0] < NODE_LIST_TTL:
             return _node_list_cache[1]
+        # ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET だと同じサブネット上の他機のノードも
+        # 探索対象になり、機体が増える/ネットワークが混むと`ros2 node list`自体が
+        # 5秒では終わらないことがある(yellowで実際に5秒超で"bringup: false"の
+        # 誤判定を引き起こした。プロセス自体はCPUを使って動いており固まってはいない)。
         result = await asyncio.to_thread(subprocess.run, ['ros2', 'node', 'list'],
                                          capture_output=True,
                                          text=True,
-                                         timeout=5,
+                                         timeout=15,
                                          env=ROS_ENV)
         _node_list_cache = (time.monotonic(), result.stdout)
         return result.stdout
