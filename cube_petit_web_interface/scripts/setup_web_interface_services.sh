@@ -29,6 +29,13 @@ export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
 export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
 export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-94}"
 export DISPLAY="${DISPLAY:-:0}"
+# 現状このLAN上にzenohのrouter(zenohd)は存在しないため、fleet_zenoh watcherは
+# peerモードで動かす(client modeだと"Unable to connect"で/fleet/robotsが
+# available:falseになる。手動foreground起動時はこれをシェルで都度exportしていたため
+# 気づきにくかったが、systemdサービス化した際にenvファイルへ引き継がれておらず
+# 全機体でフリート機能が無効になっていたバグの原因)
+export ZENOH_ROUTER_ENDPOINT="${ZENOH_ROUTER_ENDPOINT:-tcp/cube-petit-orange.local:7447}"
+export ZENOH_MODE="${ZENOH_MODE:-peer}"
 
 echo "== 1. Python venv + eclipse-zenoh (uv) =="
 if ! command -v uv >/dev/null 2>&1; then
@@ -94,7 +101,7 @@ fi
 
 echo "== 3. systemd用envファイル生成 =="
 mkdir -p "$SYSTEMD_DIR"
-KNOWN_KEYS='^(AMENT_PREFIX_PATH|PATH|PYTHONPATH|RMW_IMPLEMENTATION|ROS_AUTOMATIC_DISCOVERY_RANGE|ROS_DOMAIN_ID|ROS_DISTRO|ROS_PYTHON_VERSION|ROS_VERSION|DISPLAY|LD_LIBRARY_PATH)='
+KNOWN_KEYS='^(AMENT_PREFIX_PATH|PATH|PYTHONPATH|RMW_IMPLEMENTATION|ROS_AUTOMATIC_DISCOVERY_RANGE|ROS_DOMAIN_ID|ROS_DISTRO|ROS_PYTHON_VERSION|ROS_VERSION|DISPLAY|LD_LIBRARY_PATH|ZENOH_ROUTER_ENDPOINT|ZENOH_MODE)='
 # 既存envファイルに、上記以外の手動追加の変数(OPENAI_API_KEY等の秘密鍵)があれば
 # 保持する。このスクリプトは秘密鍵を生成しないので、上書きで消さないようにするため。
 EXTRA_LINES=""
