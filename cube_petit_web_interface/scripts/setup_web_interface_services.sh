@@ -45,14 +45,40 @@ uv pip install --python "$VENV_DIR/bin/python" fastapi "uvicorn[standard]" pyyam
 "$VENV_DIR/bin/python" -c "import zenoh, fastapi, uvicorn, rclpy; print('venv OK: zenoh/fastapi/uvicorn/rclpy import成功')"
 
 echo "== 2. Node.js / npm install (frontend) =="
-if ! command -v npm >/dev/null 2>&1; then
-  echo "node/npm が無いので apt で入れます"
-  sudo apt-get install -y nodejs npm
+# vite 8系はNode.js >=20.19 (or >=22.12) が必須。機体によってapt由来の古いnode(18系等)が
+# 入っていたり(yellowで発覚: node 18.19.1でCustomEvent is not definedというエラーで
+# vite自体が起動できずcube-petit-frontend.serviceがクラッシュループしていた)、そもそも
+# 入っていなかったりする。sudoが使えない機体もあるため、apt更新はせずnodejs.orgの
+# 公式tarballを $HOME/.local 配下にsudoなしで展開して使う(uvと同じ思想)。
+NODE_MIN_MAJOR=20
+NODE_DIST_VERSION=22.14.0
+LOCAL_NODE_DIR="$HOME/.local/nodejs-v${NODE_DIST_VERSION}"
+
+node_major() { "$1" -e 'console.log(process.versions.node.split(".")[0])' 2>/dev/null || echo 0; }
+
+if command -v node >/dev/null 2>&1 && [ "$(node_major node)" -ge "$NODE_MIN_MAJOR" ]; then
+  NODE_BIN_DIR="$(dirname "$(command -v node)")"
+else
+  echo "システムのNode.jsが無い/古い(要 >=${NODE_MIN_MAJOR})ので $LOCAL_NODE_DIR にNode.js v${NODE_DIST_VERSION}を入れます"
+  if [ ! -x "$LOCAL_NODE_DIR/bin/node" ]; then
+    case "$(uname -m)" in
+      x86_64) NODE_ARCH=x64 ;;
+      aarch64) NODE_ARCH=arm64 ;;
+      *) echo "未対応のarch: $(uname -m)"; exit 1 ;;
+    esac
+    TARBALL="node-v${NODE_DIST_VERSION}-linux-${NODE_ARCH}.tar.xz"
+    curl -LsSf "https://nodejs.org/dist/v${NODE_DIST_VERSION}/${TARBALL}" -o "/tmp/${TARBALL}"
+    mkdir -p "$LOCAL_NODE_DIR"
+    tar -xf "/tmp/${TARBALL}" -C "$LOCAL_NODE_DIR" --strip-components=1
+    rm -f "/tmp/${TARBALL}"
+  fi
+  NODE_BIN_DIR="$LOCAL_NODE_DIR/bin"
+  export PATH="$NODE_BIN_DIR:$PATH"
 fi
-NPM_BIN="$(command -v npm)"
-echo "npm: $NPM_BIN ($(node --version))"
+NPM_BIN="$NODE_BIN_DIR/npm"
+echo "npm: $NPM_BIN ($("$NODE_BIN_DIR/node" --version))"
 if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
-  (cd "$FRONTEND_DIR" && npm install)
+  (cd "$FRONTEND_DIR" && "$NPM_BIN" install)
 fi
 
 echo "== 3. systemd用envファイル生成 =="
