@@ -113,6 +113,11 @@ export function MapTab({ namespace, apiUrl }: Props) {
   // canvas
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keepoutCanvasRef = useRef<HTMLCanvasElement>(null);
+  // 地図本体(occupancy grid)を直接編集するための編集用キャンバス。keepoutと同じ仕組みで
+  // 小さいノイズ点(誤検出による孤立した黒点)を消しゴムで消せるようにする。
+  // Editable canvas for the base occupancy grid map itself, mirroring the keepout canvas, so
+  // small noise specks (isolated false-positive occupied pixels) can be erased directly.
+  const mapCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -120,8 +125,17 @@ export function MapTab({ namespace, apiUrl }: Props) {
   const drawing = useRef(false);
   const rectStart = useRef<{ x: number; y: number } | null>(null);
   const keepoutDirty = useRef(false);
+  const mapDirty = useRef(false);
+  // 編集対象: keepoutマスク か 地図本体か
+  const [editTarget, setEditTarget] = useState<'keepout' | 'map'>('keepout');
   const undoStack = useRef<ImageData[]>([]);
   const [canUndo, setCanUndo] = useState(false);
+  // 編集対象を切り替えたらUndoスタックは持ち越さない(別キャンバスのスナップショットが
+  // 混ざるのを防ぐ)。Reset the undo stack on target switch so snapshots from the other
+  // canvas never get applied to the wrong one.
+  useEffect(() => {
+    undoStack.current = []; setCanUndo(false);
+  }, [editTarget]);
 
   // map lock (iPad drawing)
   const [mapLocked, setMapLocked] = useState(false);
@@ -179,6 +193,15 @@ export function MapTab({ namespace, apiUrl }: Props) {
     } catch { ctx.clearRect(0, 0, kc.width, kc.height); }
     undoStack.current = []; setCanUndo(false);
   }, [keepoutImg, mapImg]);
+
+  // ---- 地図本体の編集用キャンバス初期化(mapImgをそのまま複製、mapImgの更新ごとに作り直す) ----
+  useEffect(() => {
+    if (!mapImg) return;
+    const mc = mapCanvasRef.current; if (!mc) return;
+    mc.width = mapImg.width; mc.height = mapImg.height;
+    mc.getContext('2d')!.drawImage(mapImg, 0, 0);
+    mapDirty.current = false;
+  }, [mapImg]);
 
   // ---- fit canvas on load ----
   useEffect(() => {
@@ -291,6 +314,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     const kc = keepoutCanvasRef.current;
+    const mc = mapCanvasRef.current;
     if (!canvas || !mapImg) return;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -299,7 +323,10 @@ export function MapTab({ namespace, apiUrl }: Props) {
     ctx.translate(piv.x, piv.y);
     ctx.rotate(viewRot);
     ctx.scale(scale, scale);
-    ctx.drawImage(mapImg, -mapImg.width / 2, -mapImg.height / 2);
+    // 地図編集(消しゴム等)を反映するため、mapImgではなく編集用キャンバス(mc)から描く。
+    // mcが未初期化の間だけmapImgへフォールバック。
+    if (mc && mc.width > 0) ctx.drawImage(mc, -mapImg.width / 2, -mapImg.height / 2);
+    else ctx.drawImage(mapImg, -mapImg.width / 2, -mapImg.height / 2);
 
     // keepout overlay
     if (kc && kc.width > 0) {
@@ -428,15 +455,18 @@ export function MapTab({ namespace, apiUrl }: Props) {
   }, [render]);
 
   // ---- keepout drawing helpers ----
+  // 編集対象(keepoutマスク/地図本体)に応じたキャンバスを返す
+  const editCanvasRef = () => editTarget === 'map' ? mapCanvasRef : keepoutCanvasRef;
+
   const getKcCtx = () => {
-    const kc = keepoutCanvasRef.current;
+    const kc = editCanvasRef().current;
     if (!kc || !mapImg) return null;
     if (kc.width === 0) { kc.width = mapImg.width; kc.height = mapImg.height; }
     return kc.getContext('2d')!;
   };
 
   const saveUndo = () => {
-    const kc = keepoutCanvasRef.current; if (!kc || kc.width === 0) return;
+    const kc = editCanvasRef().current; if (!kc || kc.width === 0) return;
     try {
       const snap = kc.getContext('2d')!.getImageData(0, 0, kc.width, kc.height);
       undoStack.current.push(snap);
@@ -446,14 +476,14 @@ export function MapTab({ namespace, apiUrl }: Props) {
   };
 
   const undo = () => {
-    const kc = keepoutCanvasRef.current; if (!kc || !undoStack.current.length) return;
+    const kc = editCanvasRef().current; if (!kc || !undoStack.current.length) return;
     kc.getContext('2d')!.putImageData(undoStack.current.pop()!, 0, 0);
     setCanUndo(undoStack.current.length > 0); render();
   };
 
   const drawAt = (ix: number, iy: number) => {
     const ctx = getKcCtx(); if (!ctx) return;
-    keepoutDirty.current = true;
+    if (editTarget === 'map') mapDirty.current = true; else keepoutDirty.current = true;
     ctx.fillStyle = tool === 'eraser' ? '#ffffff' : '#000000';
     ctx.beginPath(); ctx.arc(ix, iy, tool === 'eraser' ? brushSize * 2 : brushSize, 0, Math.PI * 2);
     ctx.fill(); render();
@@ -540,7 +570,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
       const { ix, iy } = imgCoords(clientX, clientY);
       const ctx = getKcCtx();
       if (ctx) {
-        keepoutDirty.current = true;
+        if (editTarget === 'map') mapDirty.current = true; else keepoutDirty.current = true;
         ctx.fillStyle = '#000000';
         ctx.fillRect(Math.min(rectStart.current.x, ix), Math.min(rectStart.current.y, iy),
           Math.abs(ix - rectStart.current.x), Math.abs(iy - rectStart.current.y));
@@ -654,6 +684,26 @@ export function MapTab({ namespace, apiUrl }: Props) {
       });
       const d = await r.json();
       showMsg(d.ok ? 'keepout保存完了' : '保存失敗'); keepoutDirty.current = false;
+    }, 'image/png');
+  };
+
+  // 地図本体(occupancy grid)への上書き保存。実際のナビゲーションに使われるファイルを
+  // 直接書き換えるため、keepout保存より影響が大きい。誤操作防止にconfirmを挟む
+  // (バックエンド側でも上書き前に.bakを残す)。
+  const saveMapImage = () => {
+    const mc = mapCanvasRef.current;
+    if (!mc || !selectedMap) { showMsg('既存マップを選択してください'); return; }
+    if (!confirm('地図本体を上書き保存します。ナビゲーションで実際に使われる地図が変わります。よろしいですか？')) return;
+    mc.toBlob(async blob => {
+      if (!blob) return;
+      const ab = await blob.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(ab)));
+      const r = await fetch(`${apiUrl}/map/base/save`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ map_name: selectedMap, png_base64: b64 }),
+      });
+      const d = await r.json();
+      showMsg(d.ok ? '地図保存完了' : '保存失敗'); mapDirty.current = false;
     }, 'image/png');
   };
 
@@ -875,6 +925,14 @@ export function MapTab({ namespace, apiUrl }: Props) {
           {editorMode === 'edit' && (
             <>
               <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                {(['keepout', 'map'] as const).map(target => (
+                  <button key={target} onClick={() => setEditTarget(target)}
+                    style={{ ...btnStyle(editTarget === target), flex: 1 }}>
+                    {target === 'keepout' ? 'keepout編集' : '地図本体編集'}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
                 {(['pen', 'rect', 'eraser'] as Tool[]).map(t => (
                   <button key={t} onClick={() => setTool(t)} style={btnStyle(tool === t)}>
                     {t === 'pen' ? 'ペン' : t === 'rect' ? '矩形' : '消しゴム'}
@@ -890,7 +948,11 @@ export function MapTab({ namespace, apiUrl }: Props) {
               </div>
               <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
                 <button onClick={undo} disabled={!canUndo} style={{ ...btnStyle(), flex: 1, opacity: canUndo ? 1 : 0.4 }}>↩ 戻す</button>
-                <button onClick={saveKeeout} style={{ ...btnStyle(), flex: 1, background: 'var(--t-accent)', color: '#fff' }}>keepout保存</button>
+                {editTarget === 'keepout' ? (
+                  <button onClick={saveKeeout} style={{ ...btnStyle(), flex: 1, background: 'var(--t-accent)', color: '#fff' }}>keepout保存</button>
+                ) : (
+                  <button onClick={saveMapImage} style={{ ...btnStyle(), flex: 1, background: '#cc6600', color: '#fff' }}>地図保存</button>
+                )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginBottom: 4 }}>
                 回転 <span style={{ color: 'var(--t-text-dim)' }}>{rotDeg.toFixed(1)}°</span>
@@ -1092,6 +1154,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
           />
         </div>
         <canvas ref={keepoutCanvasRef} style={{ display: 'none' }} />
+        <canvas ref={mapCanvasRef} style={{ display: 'none' }} />
       </div>
 
       {/* 右パネル */}

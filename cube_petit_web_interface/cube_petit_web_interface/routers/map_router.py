@@ -193,6 +193,30 @@ async def save_keepout(body: KeepoutSaveBody) -> dict:
     return {'ok': True}
 
 
+class MapBaseSaveBody(BaseModel):
+    map_name: str
+    png_base64: str
+
+
+@router.post('/map/base/save')
+async def save_map_base(body: MapBaseSaveBody) -> dict:
+    """地図本体(occupancy grid)を上書き保存する.
+
+    keepoutと違いナビゲーションが実際に使う地図ファイルそのものを書き換えるため、
+    上書き前に一世代分のバックアップ(map.pgm.bak)を残す(誤って消しすぎた場合の救済用)。
+    """
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    png_data = base64.b64decode(body.png_base64)
+    img = Image.open(io.BytesIO(png_data)).convert('L')
+    pgm_path = d / 'map.pgm'
+    if pgm_path.exists():
+        shutil.copyfile(pgm_path, d / 'map.pgm.bak')
+    pgm_path.write_bytes(core.helpers.pil_to_pgm_bytes(img))
+    return {'ok': True}
+
+
 class MapSaveBody(BaseModel):
     map_name: str
     dest: str = 'extra'  # 'extra' = /home/cube-petit/map, 'base' = nav pkg map dir
