@@ -5,6 +5,7 @@ import { TalkTab } from './components/TalkTab';
 import { SystemPanel } from './components/SystemPanel';
 import { CustomTab } from './components/CustomTab';
 import { MapTab } from './components/MapTab';
+import { RobotPicker } from './components/RobotPicker';
 import type { RobotConfig } from './types/ros';
 
 const DEFAULT_HOST = window.location.hostname;
@@ -134,6 +135,15 @@ export default function App() {
     inputRef.current?.blur();
   };
 
+  // Tier 2 ロボットピッカー: カードクリックで即座にそのロボットへ切り替える
+  // (connect() と違い、入力確定ボタンを経由しない一発切り替え)。
+  const selectRobotFromFleet = (newHost: string) => {
+    if (newHost === host) return;
+    setInputHost(newHost);
+    setHost(newHost);
+    localStorage.setItem('robot_host', newHost);
+  };
+
   const statusColor = {
     connected: '#00cc66',
     connecting: '#ffcc00',
@@ -229,6 +239,9 @@ export default function App() {
           </button>
         ))}
       </div>
+
+      {/* Tier 2: 複数ロボット同時閲覧ピッカー(zenoh経由。利用不可時は自動で非表示) */}
+      <RobotPicker apiUrl={apiUrl} currentNamespace={namespace ?? ''} onSelectRobot={selectRobotFromFleet} />
 
       {/* コンテンツ */}
       <div style={{ flex: 1, padding: 12, overflow: 'hidden', minHeight: 0 }}>

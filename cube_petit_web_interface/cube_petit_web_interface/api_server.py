@@ -25,6 +25,7 @@ try:
     # uvicorn cube_petit_web_interface.api_server:app で起動した場合
     from cube_petit_web_interface.routers import audio
     from cube_petit_web_interface.routers import conversation
+    from cube_petit_web_interface.routers import fleet
     from cube_petit_web_interface.routers import history
     from cube_petit_web_interface.routers import launch
     from cube_petit_web_interface.routers import map_router
@@ -38,6 +39,7 @@ except ImportError:
     import core
     from routers import audio
     from routers import conversation
+    from routers import fleet
     from routers import history
     from routers import launch
     from routers import map_router
@@ -54,7 +56,7 @@ app.add_middleware(
     allow_headers=['*'],
 )
 
-for module in (launch, system, conversation, audio, map_router, places, prompt, history):
+for module in (launch, system, conversation, audio, map_router, places, prompt, history, fleet):
     app.include_router(module.router)
 
 if __name__ == '__main__':
