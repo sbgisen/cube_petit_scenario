@@ -123,7 +123,7 @@ export function ConversationPanel({ ros, namespace, apiUrl, isActive }: Props) {
             key={i}
             style={{
               alignSelf: m.role === 'user' ? 'flex-end' : 'flex-start',
-              background: m.role === 'user' ? '#ff6600' : 'var(--t-surface2)',
+              background: m.role === 'user' ? 'var(--t-accent)' : 'var(--t-surface2)',
               color: 'var(--t-text)', padding: '6px 12px', borderRadius: 12,
               maxWidth: '80%', fontSize: 13,
             }}
@@ -197,7 +197,7 @@ export function ConversationPanel({ ros, namespace, apiUrl, isActive }: Props) {
           disabled={!isActive || (!input.trim() && images.length === 0)}
           style={{
             padding: '8px 16px', borderRadius: 20, border: 'none',
-            background: isActive && (input.trim() || images.length > 0) ? '#ff6600' : 'var(--t-border2)',
+            background: isActive && (input.trim() || images.length > 0) ? 'var(--t-accent)' : 'var(--t-border2)',
             color: 'var(--t-text)', cursor: isActive ? 'pointer' : 'not-allowed', fontSize: 13,
           }}
         >

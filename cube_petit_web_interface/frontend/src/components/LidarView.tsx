@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
+import { getAccentColor } from '../utils/theme';
 
 interface LaserScan {
   angle_min: number;
@@ -116,13 +117,14 @@ export function LidarView({ ros, namespace, enabled, width, height }: Props) {
       });
     }
 
-    // ロボット（常に表示）
-    ctx.strokeStyle = '#ff6600';
+    // ロボット（常に表示、接続中ロボットの色）
+    const robotColor = getAccentColor();
+    ctx.strokeStyle = robotColor;
     ctx.lineWidth = 2;
     ctx.beginPath();
     ctx.arc(0, 0, 12, 0, Math.PI * 2);
     ctx.stroke();
-    ctx.fillStyle = '#ff6600';
+    ctx.fillStyle = robotColor;
     ctx.beginPath();
     ctx.arc(0, 0, 6, 0, Math.PI * 2);
     ctx.fill();
@@ -236,7 +238,7 @@ export function LidarView({ ros, namespace, enabled, width, height }: Props) {
         style={{
           position: 'absolute', top: 8, right: 8,
           padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
-          background: active ? '#ff6600' : 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 12,
+          background: active ? 'var(--t-accent)' : 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 12,
         }}
       >
         LiDAR表示

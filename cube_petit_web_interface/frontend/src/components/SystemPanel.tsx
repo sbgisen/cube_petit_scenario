@@ -91,7 +91,7 @@ function VolumeSlider({ label, value, onChange }: { label: string; value: number
       <input
         type="range" min={0} max={100} value={value}
         onChange={e => onChange(Number(e.target.value))}
-        style={{ width: '100%', accentColor: '#ff6600' }}
+        style={{ width: '100%', accentColor: 'var(--t-accent)' }}
       />
     </div>
   );

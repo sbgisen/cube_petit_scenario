@@ -1,4 +1,23 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from './Icon';
+
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 10;
+const ZOOM_BUTTON_FACTOR = 1.3;
+
+// 「きれいな」目盛り(1,2,5 x 10^n [m])のうち、maxPx以下で最大のものを選ぶ
+// (Googleマップ等の縮尺バーと同じ考え方)
+function niceScaleBarMeters(targetMeters: number): number {
+  if (!isFinite(targetMeters) || targetMeters <= 0) return 1;
+  const exp = Math.floor(Math.log10(targetMeters));
+  const base = Math.pow(10, exp);
+  let best = base;
+  for (const mult of [1, 2, 5, 10]) {
+    const candidate = mult * base;
+    if (candidate <= targetMeters) best = candidate;
+  }
+  return best;
+}
 
 interface Props {
   namespace: string;
@@ -235,6 +254,38 @@ export function MapTab({ namespace, apiUrl }: Props) {
       iy: mapImg.height - (wy - meta.origin[1]) / meta.resolution - mapImg.height / 2,
     };
   }, [meta, mapImg]);
+
+  // ---- Google Maps風のズーム(+/-)・現在地ボタン・縮尺バー ----
+  const zoomBy = useCallback((factor: number) => {
+    const cont = containerRef.current;
+    if (!cont) return;
+    const cx = cont.clientWidth / 2, cy = cont.clientHeight / 2;
+    setScale(s => {
+      const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * factor));
+      setPan(p => ({ x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) }));
+      return ns;
+    });
+  }, []);
+
+  const recenterOnRobot = useCallback(() => {
+    const cont = containerRef.current;
+    if (!cont || !mapImg || !robotPose) return;
+    const { ix, iy } = worldToImg(robotPose.x, robotPose.y);
+    const cos = Math.cos(viewRot), sin = Math.sin(viewRot);
+    const cw = cont.clientWidth / 2, ch = cont.clientHeight / 2;
+    setPan({
+      x: cw - mapImg.width * scale / 2 - scale * (cos * ix - sin * iy),
+      y: ch - mapImg.height * scale / 2 - scale * (sin * ix + cos * iy),
+    });
+  }, [mapImg, robotPose, scale, viewRot, worldToImg]);
+
+  // 1マス(map画像1px) = meta.resolution [m] なので、画面上の1mあたりpx数 = scale / resolution
+  const scaleBar = useMemo(() => {
+    if (!meta || !mapImg) return null;
+    const pxPerMeter = scale / meta.resolution;
+    const meters = niceScaleBarMeters(120 / pxPerMeter);
+    return { meters, px: meters * pxPerMeter };
+  }, [meta, mapImg, scale]);
 
   // ---- render ----
   const render = useCallback(() => {
@@ -757,7 +808,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
   };
   const btnStyle = (active?: boolean): React.CSSProperties => ({
     padding: '5px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12,
-    background: active ? '#ff6600' : 'var(--t-surface2)', color: active ? '#fff' : 'var(--t-text)',
+    background: active ? 'var(--t-accent)' : 'var(--t-surface2)', color: active ? '#fff' : 'var(--t-text)',
   });
 
   const MODE_DEFS: [EditorMode, string, string][] = [
@@ -801,7 +852,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
             ))}
           </div>
           <button onClick={saveCurrentMap} disabled={saving}
-            style={{ ...btnStyle(), background: saving ? 'var(--t-border)' : '#ff6600', color: '#fff', width: '100%' }}>
+            style={{ ...btnStyle(), background: saving ? 'var(--t-border)' : 'var(--t-accent)', color: '#fff', width: '100%' }}>
             {saving ? '保存中...' : 'SLAMマップ保存'}
           </button>
         </div>
@@ -835,23 +886,23 @@ export function MapTab({ namespace, apiUrl }: Props) {
                   <span>サイズ</span><span>{brushSize}px</span>
                 </div>
                 <input type="range" min={1} max={40} value={brushSize} onChange={e => setBrushSize(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: '#ff6600' }} />
+                  style={{ width: '100%', accentColor: 'var(--t-accent)' }} />
               </div>
               <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
                 <button onClick={undo} disabled={!canUndo} style={{ ...btnStyle(), flex: 1, opacity: canUndo ? 1 : 0.4 }}>↩ 戻す</button>
-                <button onClick={saveKeeout} style={{ ...btnStyle(), flex: 1, background: '#ff6600', color: '#fff' }}>keepout保存</button>
+                <button onClick={saveKeeout} style={{ ...btnStyle(), flex: 1, background: 'var(--t-accent)', color: '#fff' }}>keepout保存</button>
               </div>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginBottom: 4 }}>
                 回転 <span style={{ color: 'var(--t-text-dim)' }}>{rotDeg.toFixed(1)}°</span>
               </div>
               <input type="range" min={-180} max={180} step={0.5} value={rotDeg} onChange={e => setRotDeg(Number(e.target.value))}
-                style={{ width: '100%', accentColor: '#ff6600', marginBottom: 5 }} />
+                style={{ width: '100%', accentColor: 'var(--t-accent)', marginBottom: 5 }} />
               <div style={{ display: 'flex', gap: 5, marginBottom: 5, flexWrap: 'nowrap', alignItems: 'center' }}>
                 <input type="number" step={0.5} value={rotDeg.toFixed(1)} onChange={e => setRotDeg(Number(e.target.value))}
                   style={{ flex: 1, minWidth: 0, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12 }} />
                 <button onClick={() => setRotDeg(0)} style={{ ...btnStyle(), whiteSpace: 'nowrap', flexShrink: 0 }}>リセット</button>
               </div>
-              <button onClick={applyRotation} style={{ ...btnStyle(), background: selectedMap ? '#ff6600' : 'var(--t-border)', color: '#fff', width: '100%' }}>
+              <button onClick={applyRotation} style={{ ...btnStyle(), background: selectedMap ? 'var(--t-accent)' : 'var(--t-border)', color: '#fff', width: '100%' }}>
                 ファイルに適用
               </button>
             </>
@@ -884,7 +935,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button onClick={() => { setPlaceDraft(null); placeDraftRef.current = null; }} style={{ ...btnStyle(), flex: 1 }}>キャンセル</button>
                   <button onClick={confirmPlace} disabled={!placeName.trim() || !selectedMap}
-                    style={{ ...btnStyle(), flex: 1, background: placeName.trim() && selectedMap ? '#ff6600' : 'var(--t-border)', color: '#fff' }}>
+                    style={{ ...btnStyle(), flex: 1, background: placeName.trim() && selectedMap ? 'var(--t-accent)' : 'var(--t-border)', color: '#fff' }}>
                     追加
                   </button>
                 </div>
@@ -978,13 +1029,53 @@ export function MapTab({ namespace, apiUrl }: Props) {
           <button
             onClick={() => setMapLocked(v => !v)}
             style={{ position: 'absolute', top: 8, right: 8, zIndex: 5, padding: '4px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
-              background: mapLocked ? '#ff6600' : 'rgba(0,0,0,0.45)', color: '#fff' }}>
+              background: mapLocked ? 'var(--t-accent)' : 'rgba(0,0,0,0.45)', color: '#fff' }}>
             {mapLocked ? '🔒 ロック中' : '🔓 ロック'}
           </button>
         )}
         {robotPose && mapImg && (
           <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: '#00ff88', padding: '3px 8px', borderRadius: 8, fontSize: 11, zIndex: 5 }}>
             🤖 ({robotPose.x.toFixed(2)}, {robotPose.y.toFixed(2)}) {(robotPose.yaw * 180 / Math.PI).toFixed(1)}°
+          </div>
+        )}
+
+        {/* Google Maps風: 右下にズーム+/-と現在地ボタン、縮尺バー */}
+        {mapImg && (
+          <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+            {scaleBar && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <span style={{ fontSize: 10, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '1px 6px', borderRadius: 6 }}>
+                  {scaleBar.meters >= 1 ? `${scaleBar.meters} m` : `${scaleBar.meters * 100} cm`}
+                </span>
+                <div style={{ width: Math.max(4, scaleBar.px), height: 3, background: '#fff', borderRadius: 2, boxShadow: '0 0 0 1px rgba(0,0,0,0.5)' }} />
+              </div>
+            )}
+            <button
+              onClick={recenterOnRobot}
+              disabled={!robotPose}
+              title="現在地に戻る"
+              style={{
+                width: 34, height: 34, borderRadius: '50%', border: 'none',
+                cursor: robotPose ? 'pointer' : 'not-allowed',
+                background: 'rgba(0,0,0,0.55)', color: robotPose ? '#00ff88' : '#666',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+              }}
+            >
+              <Icon name="my_location" size={18} />
+            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden', background: 'rgba(0,0,0,0.55)' }}>
+              <button
+                onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
+                title="ズームイン"
+                style={{ width: 34, height: 30, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="add" size={18} /></button>
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.25)' }} />
+              <button
+                onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
+                title="ズームアウト"
+                style={{ width: 34, height: 30, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="remove" size={18} /></button>
+            </div>
           </div>
         )}
         {!mapImg && (

@@ -47,7 +47,7 @@ export function CameraView({ ros, namespace, enabled, height = 200, flex = false
         position: 'absolute', top: 6, right: 6, zIndex: 1,
         display: 'flex', alignItems: 'center', gap: 4,
         padding: '4px 10px', borderRadius: 20, border: 'none', cursor: 'pointer',
-        background: active ? '#ff6600' : 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 12,
+        background: active ? 'var(--t-accent)' : 'rgba(0,0,0,0.45)', color: '#fff', fontSize: 12,
       }}
     >
       <PhotoCameraIcon style={{ fontSize: 14 }} />

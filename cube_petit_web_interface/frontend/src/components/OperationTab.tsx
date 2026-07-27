@@ -156,7 +156,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         {LAYER_LABELS.map(({ key, label }) => (
           <button key={key} onClick={() => toggleLayer(key)} style={{
             padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-            background: layers[key] ? '#ff6600' : 'var(--t-border)', color: 'var(--t-text)', fontSize: 13,
+            background: layers[key] ? 'var(--t-accent)' : 'var(--t-border)', color: 'var(--t-text)', fontSize: 13,
           }}>
             {label}
           </button>
@@ -170,7 +170,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
           </button>
           {showPOI && poiMaps.length > 0 && (
             <select value={poiMap} onChange={e => setPoiMap(e.target.value)}
-              style={{ padding: '4px 4px', fontSize: 12, background: '#333', color: 'var(--t-text)', border: 'none', borderLeft: '1px solid #555', maxWidth: 110, cursor: 'pointer' }}>
+              style={{ padding: '4px 4px', fontSize: 12, background: '#333', color: '#fff', border: 'none', borderLeft: '1px solid #555', maxWidth: 110, cursor: 'pointer' }}>
               {poiMaps.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           )}
@@ -181,7 +181,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
             {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期']] as [MapMode, string][]).map(([m, label]) => (
               <button key={m} onClick={() => handleSetMapMode(m)} style={{
                 padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13,
-                background: mapMode === m ? '#0088ff' : 'transparent', color: 'var(--t-text)',
+                background: mapMode === m ? '#0088ff' : 'transparent', color: '#fff',
               }}>
                 {label}
               </button>
@@ -196,7 +196,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
                   padding: '6px 14px', border: 'none', fontSize: 13,
                   cursor: disabled ? 'not-allowed' : 'pointer',
                   background: (is3D ? '3D' : '2D') === m ? '#555' : 'transparent',
-                  color: disabled ? '#555' : 'var(--t-text)',
+                  color: disabled ? '#777' : '#fff',
                 }}>
                   {m}
                 </button>
@@ -210,7 +210,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
                 <button key={f} onClick={() => setMapFrame(f)} style={{
                   padding: '6px 12px', border: 'none', fontSize: 12, cursor: 'pointer',
                   background: mapFrame === f ? '#336633' : 'transparent',
-                  color: 'var(--t-text)',
+                  color: '#fff',
                 }}>
                   {f === 'base_link' ? 'base' : f}
                 </button>

@@ -120,10 +120,16 @@ async def kill_all_ros() -> dict:
 async def get_status() -> dict:
     try:
         node_output = await core.get_node_list_output()
+        # ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET のため、同じサブネット上の他機の
+        # ノードも ros2 node list に出てくる。名前空間で絞らないと、例えば pink の
+        # rosbridge_websocket ノードを orange 側の判定が誤って拾ってしまう
+        # (rosbridgeが実際は落ちてるのに「起動中」と表示され続けるバグの原因)。
+        own_ns_prefix = f'/{core.DEFAULT_NAMESPACE}/'
+        own_nodes = [line for line in node_output.splitlines() if line.startswith(own_ns_prefix)]
         status = {}
         for target, marker in core.LAUNCH_NODE_MARKERS.items():
             proc_alive = core.processes[target] is not None and core.processes[target].poll() is None
-            status[target] = proc_alive or (marker in node_output)
+            status[target] = proc_alive or any(marker in line for line in own_nodes)
         return status
     except Exception:
         return {target: proc is not None and proc.poll() is None for target, proc in core.processes.items()}

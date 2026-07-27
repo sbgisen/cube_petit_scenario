@@ -32,10 +32,10 @@ export function QuickPhraseGrid({ phrases, onSpeak, onAdd, speechAvailable }: Pr
             cursor: speechAvailable ? 'pointer' : 'not-allowed',
             opacity: speechAvailable ? 1 : 0.5,
           }}
-          onMouseDown={(e) => speechAvailable && (e.currentTarget.style.background = '#ff6600')}
+          onMouseDown={(e) => speechAvailable && (e.currentTarget.style.background = 'var(--t-accent)')}
           onMouseUp={(e) => speechAvailable && (e.currentTarget.style.background = 'var(--t-surface2)')}
           onMouseLeave={(e) => speechAvailable && (e.currentTarget.style.background = 'var(--t-surface2)')}
-          onTouchStart={(e) => speechAvailable && (e.currentTarget.style.background = '#ff6600')}
+          onTouchStart={(e) => speechAvailable && (e.currentTarget.style.background = 'var(--t-accent)')}
           onTouchEnd={(e) => speechAvailable && (e.currentTarget.style.background = 'var(--t-surface2)')}
         >
           {phrase}

@@ -82,7 +82,7 @@ export function Joystick({ ros, namespace, maxLinear = 0.3, maxAngular = 4.0 }: 
     >
       <div style={{
         width: KNOB, height: KNOB, borderRadius: '50%',
-        background: '#ff6600', position: 'absolute',
+        background: 'var(--t-accent)', position: 'absolute',
         left: SIZE / 2 - KNOB / 2 + knobPos.x,
         top: SIZE / 2 - KNOB / 2 + knobPos.y,
         pointerEvents: 'none',

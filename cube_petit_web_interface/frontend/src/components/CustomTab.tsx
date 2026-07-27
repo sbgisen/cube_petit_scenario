@@ -75,7 +75,7 @@ function FileList({
             style={{ padding: '5px 8px', borderRadius: 6, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12 }}
           />
           <div style={{ display: 'flex', gap: 4 }}>
-            <button onClick={create} style={{ flex: 1, padding: '4px', borderRadius: 6, border: 'none', cursor: 'pointer', background: '#ff6600', color: '#fff', fontSize: 12 }}>作成</button>
+            <button onClick={create} style={{ flex: 1, padding: '4px', borderRadius: 6, border: 'none', cursor: 'pointer', background: 'var(--t-accent)', color: '#fff', fontSize: 12 }}>作成</button>
             <button onClick={() => setShowNew(false)} style={{ padding: '4px 8px', borderRadius: 6, border: '1px solid var(--t-border2)', cursor: 'pointer', background: 'transparent', color: 'var(--t-text-dim)', fontSize: 12 }}>✕</button>
           </div>
         </div>
@@ -217,7 +217,7 @@ export function CustomTab({ apiUrl, quickPhrases, setQuickPhrases }: Props) {
             ))}
           </div>
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginTop: 6, flexShrink: 0 }}>
-            <button onClick={savePhrases} style={{ padding: '6px 18px', borderRadius: 16, border: 'none', cursor: 'pointer', background: '#ff6600', color: '#fff', fontSize: 13 }}>保存</button>
+            <button onClick={savePhrases} style={{ padding: '6px 18px', borderRadius: 16, border: 'none', cursor: 'pointer', background: 'var(--t-accent)', color: '#fff', fontSize: 13 }}>保存</button>
           </div>
         </div>
 
@@ -267,7 +267,7 @@ export function CustomTab({ apiUrl, quickPhrases, setQuickPhrases }: Props) {
               <span style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>※保存後はrealtime_gpt_chatの再起動が必要です</span>
               {!PROTECTED_PROMPTS.has(selectedPrompt) && (
                 <button onClick={savePrompt}
-                  style={{ padding: '6px 18px', borderRadius: 16, border: 'none', cursor: 'pointer', background: saved ? '#00cc66' : '#ff6600', color: '#fff', fontSize: 13, transition: 'background 0.3s' }}>
+                  style={{ padding: '6px 18px', borderRadius: 16, border: 'none', cursor: 'pointer', background: saved ? '#00cc66' : 'var(--t-accent)', color: '#fff', fontSize: 13, transition: 'background 0.3s' }}>
                   {saved ? '保存済み' : '保存'}
                 </button>
               )}

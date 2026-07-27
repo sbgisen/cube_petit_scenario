@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, useMemo } from 'react';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
 import { useRosTf } from '../hooks/useRosTf';
+import { getAccentColor } from '../utils/theme';
 import type { LayerVisibility } from '../types/ros';
 
 interface LaserScan {
@@ -592,10 +593,11 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       });
     }
 
-    // ロボット（mapフレームではTF位置に、それ以外は原点に描画）
-    ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 2;
+    // ロボット（mapフレームではTF位置に、それ以外は原点に描画。接続中ロボットの色）
+    const robotColor = getAccentColor();
+    ctx.strokeStyle = robotColor; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(robotCanvasX, robotCanvasY, 12, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#ff6600';
+    ctx.fillStyle = robotColor;
     ctx.beginPath(); ctx.arc(robotCanvasX, robotCanvasY, 6, 0, Math.PI * 2); ctx.fill();
     const fwdDx = frame !== 'base_link' ? -sin_yaw * 20 : 0;
     const fwdDy = frame !== 'base_link' ? -cos_yaw * 20 : -20;
