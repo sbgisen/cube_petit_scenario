@@ -195,6 +195,28 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
     fetch(`${apiUrl}/audio/volume?type=${type}&value=${value}`, { method: 'POST' }).catch(() => {});
   };
 
+  // コントローラのBluetooth接続状況。ペアリングボタンの表示・接続済み表示に使う
+  const [connectedControllers, setConnectedControllers] = useState<{ mac: string; name: string }[]>([]);
+  const [pairing, setPairing] = useState(false);
+  useEffect(() => {
+    const poll = () =>
+      fetch(`${apiUrl}/system/bluetooth/controllers`).then(r => r.json())
+        .then(d => setConnectedControllers(d.connected || [])).catch(() => {});
+    poll();
+    const t = setInterval(poll, 5000);
+    return () => clearInterval(t);
+  }, [apiUrl]);
+  const pairController = async () => {
+    setPairing(true);
+    const res = await fetch(`${apiUrl}/system/bluetooth/pair`, { method: 'POST' })
+      .then(r => r.json()).catch(() => ({ ok: false, message: '通信エラー' }));
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setCmdLog(prev => [{ time, msg: `コントローラペアリング — ${res.message ?? ''}`, ok: !!res.ok }, ...prev].slice(0, 50));
+    setPairing(false);
+    fetch(`${apiUrl}/system/bluetooth/controllers`).then(r => r.json())
+      .then(d => setConnectedControllers(d.connected || [])).catch(() => {});
+  };
+
   const [canRestarting, setCanRestarting] = useState(false);
   const restartCan = async () => {
     setCanRestarting(true);
@@ -281,6 +303,35 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
           value={micVol}
           onChange={v => { setMicVol(v); applyVolume('mic', v); }}
         />
+
+        <div style={{ marginTop: 12, paddingTop: 10, borderTop: '1px solid var(--t-border)' }}>
+          <div style={{ color: 'var(--t-text-muted)', fontSize: 12, marginBottom: 6 }}>コントローラ</div>
+          {connectedControllers.length > 0 ? (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
+              {connectedControllers.map(c => (
+                <div key={c.mac} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <Dot ok />
+                  <span style={{ color: 'var(--t-text)', fontSize: 12 }}>{c.name}</span>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div style={{ fontSize: 11, color: 'var(--t-text-dim)', marginBottom: 8 }}>未接続</div>
+          )}
+          <button
+            onClick={pairController}
+            disabled={pairing}
+            title="コントローラをペアリングモード(PSボタン+SHAREボタン長押し)にしてから押してください"
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '4px 12px', borderRadius: 12, border: 'none',
+              cursor: pairing ? 'not-allowed' : 'pointer', fontSize: 12,
+              background: pairing ? 'var(--t-border)' : '#0088ff', color: '#fff', opacity: pairing ? 0.6 : 1,
+            }}
+          >
+            <Icon name="bluetooth" size={14} />
+            {pairing ? 'ペアリング中…' : 'コントローラ接続'}
+          </button>
+        </div>
       </div>
 
       {/* コマンドログ: 4列目 */}

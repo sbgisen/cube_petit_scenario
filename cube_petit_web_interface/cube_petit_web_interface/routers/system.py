@@ -141,6 +141,93 @@ async def restart_can() -> dict:
         return {'ok': False, 'message': str(e)}
 
 
+_CONTROLLER_NAME_PATTERNS = ('wireless controller', 'dualshock', 'dualsense', 'xbox', 'joy-con')
+
+
+def _is_controller_name(name: str) -> bool:
+    lname = name.lower()
+    return any(p in lname for p in _CONTROLLER_NAME_PATTERNS)
+
+
+def _parse_bluetoothctl_devices(stdout: str) -> list[dict]:
+    """`bluetoothctl devices` 系コマンドの `Device <MAC> <Name>` 形式を解析する."""
+    devices = []
+    for line in stdout.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) == 3 and parts[0] == 'Device':
+            devices.append({'mac': parts[1], 'name': parts[2]})
+    return devices
+
+
+@router.get('/system/bluetooth/controllers')
+async def get_bluetooth_controllers() -> dict:
+    """接続中のコントローラ(PS4/PS5/Xbox等)一覧を返す."""
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Connected'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
+        connected = [d for d in _parse_bluetoothctl_devices(r.stdout) if _is_controller_name(d['name'])]
+        return {'connected': connected}
+    except Exception as e:
+        return {'connected': [], 'error': str(e)}
+
+
+@router.post('/system/bluetooth/pair')
+async def pair_bluetooth_controller() -> dict:
+    """コントローラのペアリングモード(PS+SHAREボタン長押し等)中にスキャンして自動ペア接続する.
+
+    bluetoothctlの非対話CLI(BlueZ 5.5x以降)で power on → scan(タイムアウト付き)
+    → 新規に見つかったコントローラらしき機器を pair/trust/connect する。
+    見つからなければその旨を返す(呼び出し元でユーザーに再試行を促す)。
+    """
+    try:
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'power', 'on'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5)
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', '--timeout', '12', 'scan', 'on'],
+                                capture_output=True,
+                                text=True,
+                                timeout=20)
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
+        candidates = [d for d in _parse_bluetoothctl_devices(r.stdout) if _is_controller_name(d['name'])]
+        if not candidates:
+            return {
+                'ok': False,
+                'message': 'コントローラが見つかりませんでした。ペアリングモード'
+                           '(PSボタン+SHAREボタン長押し)にしてから再試行してください',
+            }
+
+        connected = []
+        for dev in candidates:
+            mac = dev['mac']
+            await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'pair', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10)
+            await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'trust', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10)
+            r_conn = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'connect', mac],
+                                             capture_output=True,
+                                             text=True,
+                                             timeout=10)
+            if 'Connection successful' in r_conn.stdout or 'already connected' in r_conn.stdout.lower():
+                connected.append(dev)
+
+        if connected:
+            names = '、'.join(d['name'] for d in connected)
+            return {'ok': True, 'message': f'{names} に接続しました', 'connected': connected}
+        return {'ok': False, 'message': 'コントローラは見つかりましたが接続できませんでした'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+
+
 @router.get('/ros/nodes')
 async def get_ros_nodes() -> dict:
     try:
