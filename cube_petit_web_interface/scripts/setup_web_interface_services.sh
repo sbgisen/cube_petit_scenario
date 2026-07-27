@@ -77,8 +77,19 @@ else
 fi
 NPM_BIN="$NODE_BIN_DIR/npm"
 echo "npm: $NPM_BIN ($("$NODE_BIN_DIR/node" --version))"
+# node_modules は使用したnodeのメジャーバージョンをマーカーファイルに記録しておき、
+# 前回と違うnodeで再実行された場合(yellowでnode18→22に切り替えた際に発覚: 古いnpmが
+# 作ったnode_modulesのままだとrolldownのネイティブbindingが欠落しvite起動時に
+# MODULE_NOT_FOUNDでクラッシュした)は入れ直す
+NODE_MARKER="$FRONTEND_DIR/node_modules/.node_major_used"
+CURRENT_NODE_MAJOR="$("$NODE_BIN_DIR/node" -e 'console.log(process.versions.node.split(".")[0])')"
+if [ -d "$FRONTEND_DIR/node_modules" ] && [ "$(cat "$NODE_MARKER" 2>/dev/null || echo '')" != "$CURRENT_NODE_MAJOR" ]; then
+  echo "node_modules が別のNode.jsメジャーバージョンで作られているため入れ直します"
+  rm -rf "$FRONTEND_DIR/node_modules"
+fi
 if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   (cd "$FRONTEND_DIR" && "$NPM_BIN" install)
+  echo "$CURRENT_NODE_MAJOR" > "$NODE_MARKER"
 fi
 
 echo "== 3. systemd用envファイル生成 =="
