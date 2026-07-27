@@ -91,6 +91,22 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
     setMapMode(m);
     if (m === 'goal' || m === 'initialpose') setIs3D(false);
   };
+
+  // マップ作成モード中のみ有効。create_mapを再起動してSLAM地図を作り直す
+  // (slam_toolboxのオンラインモードには汎用のclear serviceがないため、
+  // 既存のlaunch stop/startを使うのが最も確実)
+  const [clearingMap, setClearingMap] = useState(false);
+  const handleClearMap = async () => {
+    if (!confirm('地図をクリアして最初から作り直しますか？(作成中の地図は失われます)')) return;
+    setClearingMap(true);
+    try {
+      await fetch(`${apiUrl}/launch/create_map/stop`, { method: 'POST' });
+      await new Promise(r => setTimeout(r, 1500));
+      await fetch(`${apiUrl}/launch/create_map/start`, { method: 'POST' });
+    } finally {
+      setClearingMap(false);
+    }
+  };
   const [mapSize, setMapSize] = useState<{ w: number; h: number }>({ w: 400, h: 400 });
 
   const navStatus = useRosTopic<{ status_list: { status: number }[] }>(
@@ -268,6 +284,18 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
             </div>
           )}
         </div>
+
+        {/* マップ作成モード中のみ: 地図クリア(作り直し) */}
+        {runMode === 'map_creation' && (
+          <button onClick={handleClearMap} disabled={clearingMap}
+            title="SLAM地図を破棄してcreate_mapを再起動します" style={{
+              padding: '6px 14px', borderRadius: 20, border: 'none', fontSize: 13, flexShrink: 0,
+              cursor: clearingMap ? 'not-allowed' : 'pointer',
+              background: '#663333', color: '#fff', opacity: clearingMap ? 0.6 : 1,
+            }}>
+            🗑️ {clearingMap ? 'クリア中…' : '地図クリア'}
+          </button>
+        )}
 
         {/* 現在のモード表示(マップ作成/自律移動/手動操作/未起動) */}
         <div title="rosbridge/launch/statusのcreate_map・navigation・bringupから判定" style={{
