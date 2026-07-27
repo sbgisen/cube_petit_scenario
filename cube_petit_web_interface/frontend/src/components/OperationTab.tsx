@@ -5,11 +5,28 @@ import { MapView3D } from './MapView3D';
 import { Joystick } from './Joystick';
 import { CameraView } from './CameraView';
 import { QuickPhraseGrid } from './QuickPhraseGrid';
+import { Icon } from './Icon';
 import { useRosPublisher, useRosTopic } from '../hooks/useRosTopic';
 import { useRosAction } from '../hooks/useRosAction';
 import { useRosService } from '../hooks/useRosService';
 import { useSpeechServerAlive } from '../hooks/useRosNodeAlive';
 import type { LayerVisibility } from '../types/ros';
+
+type RunMode = 'stopped' | 'map_creation' | 'autonomous' | 'manual';
+
+const RUN_MODE_INFO: Record<RunMode, { label: string; color: string; icon: string }> = {
+  stopped:      { label: '未起動',         color: '#777777', icon: 'power_off' },
+  map_creation: { label: 'マップ作成モード', color: '#e6c200', icon: 'edit_location_alt' },
+  autonomous:   { label: '自律移動モード',   color: '#00cc66', icon: 'smart_toy' },
+  manual:       { label: '手動操作モード',   color: '#0088ff', icon: 'sports_esports' },
+};
+
+function deriveRunMode(status: Record<string, boolean> | null): RunMode {
+  if (!status?.bringup) return 'stopped';
+  if (status.create_map) return 'map_creation';
+  if (status.navigation) return 'autonomous';
+  return 'manual';
+}
 
 interface Props {
   ros: ROSLIB.Ros | null;
@@ -149,6 +166,18 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
   const toggleLayer = (key: keyof LayerVisibility) =>
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  // 現在のモード(マップ作成/自律移動/手動操作)表示用。/launch/status の
+  // create_map・navigation・bringup の起動状況から導出する
+  const [launchStatus, setLaunchStatus] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    const poll = () => fetch(`${apiUrl}/launch/status`).then(r => r.json()).then(setLaunchStatus).catch(() => {});
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => clearInterval(t);
+  }, [apiUrl]);
+  const runMode = deriveRunMode(launchStatus);
+  const runModeInfo = RUN_MODE_INFO[runMode];
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflow: 'hidden', position: 'relative' }}>
       {/* 全幅コントロール行 */}
@@ -217,6 +246,16 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
               ))}
             </div>
           )}
+        </div>
+
+        {/* 現在のモード表示(マップ作成/自律移動/手動操作/未起動) */}
+        <div title="rosbridge/launch/statusのcreate_map・navigation・bringupから判定" style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 20,
+          background: `${runModeInfo.color}22`, color: runModeInfo.color, fontSize: 13,
+          marginLeft: 'auto', flexShrink: 0,
+        }}>
+          <Icon name={runModeInfo.icon} size={16} />
+          {runModeInfo.label}
         </div>
       </div>
 
