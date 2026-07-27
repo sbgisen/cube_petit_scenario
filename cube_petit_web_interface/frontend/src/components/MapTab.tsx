@@ -1104,14 +1104,6 @@ export function MapTab({ namespace, apiUrl }: Props) {
         {/* Google Maps風: 右下にズーム+/-と現在地ボタン、縮尺バー */}
         {mapImg && (
           <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
-            {scaleBar && (
-              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
-                <span style={{ fontSize: 10, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '1px 6px', borderRadius: 6 }}>
-                  {scaleBar.meters >= 1 ? `${scaleBar.meters} m` : `${scaleBar.meters * 100} cm`}
-                </span>
-                <div style={{ width: Math.max(4, scaleBar.px), height: 3, background: '#fff', borderRadius: 2, boxShadow: '0 0 0 1px rgba(0,0,0,0.5)' }} />
-              </div>
-            )}
             <button
               onClick={recenterOnRobot}
               disabled={!robotPose}
@@ -1139,6 +1131,14 @@ export function MapTab({ namespace, apiUrl }: Props) {
                 style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               ><Icon name="remove" size={22} /></button>
             </div>
+            {scaleBar && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <span style={{ fontSize: 10, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '1px 6px', borderRadius: 6 }}>
+                  {scaleBar.meters >= 1 ? `${scaleBar.meters} m` : `${scaleBar.meters * 100} cm`}
+                </span>
+                <div style={{ width: Math.max(4, scaleBar.px), height: 3, background: '#fff', borderRadius: 2, boxShadow: '0 0 0 1px rgba(0,0,0,0.5)' }} />
+              </div>
+            )}
           </div>
         )}
         {!mapImg && (
