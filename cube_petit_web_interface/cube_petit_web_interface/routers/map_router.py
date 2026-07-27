@@ -13,6 +13,7 @@
 # limitations under the License.
 """マップ管理 API (/map/*) — マップ一覧・画像・places/rooms・保存・回転・初期位置."""
 
+import asyncio
 import base64
 import io
 import math
@@ -21,12 +22,14 @@ import shutil
 import subprocess
 import tempfile
 from typing import Optional
+import zipfile
 
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel
+import requests
 import yaml
 
 try:
@@ -481,3 +484,62 @@ async def rename_map_room(map_name: str, old_name: str, new_name: str) -> dict:
             break
     _save_map_rooms(map_name, rooms)
     return {'ok': True}
+
+
+# --- 機体間でのマップ共有 (/map/share は送信元、/map/receive は受信側) ---
+
+
+def _zip_map_dir(d: Path) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for f in d.iterdir():
+            if f.is_file():
+                zf.write(f, arcname=f.name)
+    return buf.getvalue()
+
+
+class MapShareBody(BaseModel):
+    map_name: str
+    target_host: str  # 例: 'cube-petit-yellow.local'
+
+
+@router.post('/map/share')
+async def share_map(body: MapShareBody) -> dict:
+    """このロボットにあるマップ一式を、他ロボットのweb_interfaceへHTTPで送る.
+
+    zip化してbase64で/map/receiveにPOSTするだけのシンプルな実装(zenohの
+    フリート網はpose/battery等の小さいメッセージ用途のため、7MB前後になる
+    ポーズグラフを含むマップ転送には素直にHTTP経由にした)。
+    """
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    zip_bytes = _zip_map_dir(d)
+    payload = {'map_name': body.map_name, 'zip_base64': base64.b64encode(zip_bytes).decode()}
+    try:
+        resp = await asyncio.to_thread(requests.post,
+                                       f'http://{body.target_host}:8000/map/receive',
+                                       json=payload,
+                                       timeout=30)
+        if resp.status_code != 200:
+            return {'ok': False, 'message': f'{body.target_host}: HTTP {resp.status_code}'}
+        data = resp.json()
+        return {'ok': bool(data.get('ok')), 'message': data.get('message', '')}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+
+
+class MapReceiveBody(BaseModel):
+    map_name: str
+    zip_base64: str
+
+
+@router.post('/map/receive')
+async def receive_map(body: MapReceiveBody) -> dict:
+    """他ロボットから送られてきたマップ一式を保存する(/map/shareの受信側)."""
+    dest_dir = core.MAP_EXTRA_DIR / body.map_name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    zip_bytes = base64.b64decode(body.zip_base64)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        zf.extractall(dest_dir)
+    return {'ok': True, 'message': f'{body.map_name}を受信しました'}

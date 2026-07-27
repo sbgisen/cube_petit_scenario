@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Icon } from './Icon';
+import { robotNameToHost } from './RobotPicker';
 
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 10;
@@ -78,6 +79,26 @@ export function MapTab({ namespace, apiUrl }: Props) {
   const [rooms, setRooms] = useState<MapRoom[]>([]);
   const [robotPose, setRobotPose] = useState<RobotPose | null>(null);
   const [msg, setMsg] = useState('');
+
+  // マップ共有: フリート上の他ロボット一覧(自分は除く)を選んでHTTP転送する
+  const [fleetRobotNames, setFleetRobotNames] = useState<string[]>([]);
+  const [shareTarget, setShareTarget] = useState('');
+  const [sharing, setSharing] = useState(false);
+  useEffect(() => {
+    fetch(`${apiUrl}/fleet/robots`).then(r => r.json())
+      .then(d => setFleetRobotNames(Object.keys(d.robots ?? {}).filter(n => n !== namespace)))
+      .catch(() => {});
+  }, [apiUrl, namespace]);
+  const shareMap = async () => {
+    if (!selectedMap || !shareTarget) return;
+    setSharing(true);
+    const r = await fetch(`${apiUrl}/map/share`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ map_name: selectedMap, target_host: robotNameToHost(shareTarget) }),
+    }).then(res => res.json()).catch(() => ({ ok: false, message: '通信エラー' }));
+    setSharing(false);
+    showMsg(r.ok ? `共有完了: ${r.message}` : `共有失敗: ${r.message}`);
+  };
 
   // SLAM map save
   const [saveMapName, setSaveMapName] = useState('');
@@ -883,6 +904,23 @@ export function MapTab({ namespace, apiUrl }: Props) {
             {maps.map(m => <option key={m} value={m}>{m}</option>)}
           </select>
         </div>
+
+        {/* 他機に共有 */}
+        {fleetRobotNames.length > 0 && (
+          <div style={cardStyle}>
+            <SectionTitle>他機に共有</SectionTitle>
+            <select value={shareTarget} onChange={e => setShareTarget(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12, marginBottom: 6, width: '100%' }}>
+              <option value="">-- 送信先を選択 --</option>
+              {fleetRobotNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button onClick={shareMap} disabled={sharing || !selectedMap || !shareTarget}
+              style={{ ...btnStyle(), background: sharing ? 'var(--t-border)' : 'var(--t-accent)', color: '#fff', width: '100%',
+                opacity: (!selectedMap || !shareTarget) ? 0.5 : 1 }}>
+              {sharing ? '送信中...' : `📤 ${selectedMap || '(マップ未選択)'} を送る`}
+            </button>
+          </div>
+        )}
 
         {/* SLAM保存 */}
         <div style={cardStyle}>

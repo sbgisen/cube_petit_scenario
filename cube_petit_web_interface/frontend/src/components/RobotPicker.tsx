@@ -76,7 +76,7 @@ export function nicknameForRobot(namespace: string): string {
  * (matches cube_petit_fleet_bridge's `zenoh_router_endpoint` default naming
  * convention: 'tcp/cube-petit-orange.local:7447').
  */
-function robotNameToHost(name: string): string {
+export function robotNameToHost(name: string): string {
   return `${name.replace(/_/g, '-')}.local`;
 }
 

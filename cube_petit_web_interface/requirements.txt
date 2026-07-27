@@ -8,3 +8,7 @@
 # or inside a uv-managed venv:
 #   uv venv && uv pip install -r requirements.txt
 eclipse-zenoh>=1.0.0
+
+# 機体間マップ共有(/map/share)でのHTTP転送に使用。requestsは既にFastAPI関連の
+# 依存で入っていることが多いが、pip解決の都合上明示しておく。
+requests>=2.31.0
