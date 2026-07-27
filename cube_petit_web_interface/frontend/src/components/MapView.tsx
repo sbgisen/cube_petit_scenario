@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
-import { useRosTf } from '../hooks/useRosTf';
+import { useRosTf, type TFTransform } from '../hooks/useRosTf';
 import { getAccentColor } from '../utils/theme';
 import { Icon } from './Icon';
 import type { LayerVisibility } from '../types/ros';
@@ -164,6 +164,18 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
   mapTfRef.current = mapTf;
   const odomRef = useRef(odom);
   odomRef.current = odom;
+  // TF購読は依存配列(frame/layers切替等)が変わるたびに一旦リセットされ、次のTF publishまで
+  // null になる(/tfはtransient_localではないため)。ここで ?? 0 のまま使うと、その一瞬だけ
+  // ロボットが地図原点にジャンプして見えてしまう。最後に受信した値を保持し、購読が瞬断
+  // している間はそれを使い続けることでジャンプを防ぐ。
+  // The TF subscription resets whenever its deps change (frame/layer toggles etc.) and stays
+  // null until the next publish (/tf is not transient_local). Falling straight back to 0 during
+  // that gap made the robot appear to jump to the map origin. Keep the last received value and
+  // keep using it through brief gaps instead of snapping to 0.
+  const lastMapTfRef = useRef<TFTransform | null>(null);
+  if (mapTf) lastMapTfRef.current = mapTf;
+  const lastOdomRef = useRef<Odometry | null>(null);
+  if (odom) lastOdomRef.current = odom;
 
   const centeredForMapRef = useRef(false);
 
@@ -323,10 +335,10 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     // map/odomフレーム: 原点固定・ロボット移動。base_link: ロボット固定
     const inMapFrame = frame === 'map';
     const inOdomFrame = frame === 'odom';
-    const robot_map_x = mapTf?.translation.x ?? 0;
-    const robot_map_y = mapTf?.translation.y ?? 0;
-    const robot_odom_x = odom?.pose.pose.position.x ?? 0;
-    const robot_odom_y = odom?.pose.pose.position.y ?? 0;
+    const robot_map_x = (mapTf ?? lastMapTfRef.current)?.translation.x ?? 0;
+    const robot_map_y = (mapTf ?? lastMapTfRef.current)?.translation.y ?? 0;
+    const robot_odom_x = (odom ?? lastOdomRef.current)?.pose.pose.position.x ?? 0;
+    const robot_odom_y = (odom ?? lastOdomRef.current)?.pose.pose.position.y ?? 0;
     const robotCanvasX = inMapFrame ? -robot_map_y * s : inOdomFrame ? -robot_odom_y * s : 0;
     const robotCanvasY = inMapFrame ? -robot_map_x * s : inOdomFrame ? -robot_odom_x * s : 0;
     // map座標の点を現フレームで描くときのオフセット
@@ -418,8 +430,8 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     }
 
     const robotOrientation =
-      frame === 'odom' ? odom?.pose.pose.orientation :
-      frame === 'map'  ? mapTf?.rotation :
+      frame === 'odom' ? (odom ?? lastOdomRef.current)?.pose.pose.orientation :
+      frame === 'map'  ? (mapTf ?? lastMapTfRef.current)?.rotation :
       null;
     const robotYaw = robotOrientation ? quatToYaw(robotOrientation.z, robotOrientation.w) : 0;
     const cos_yaw = Math.cos(robotYaw);
