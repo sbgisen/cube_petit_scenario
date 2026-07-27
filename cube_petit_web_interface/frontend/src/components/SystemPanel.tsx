@@ -102,7 +102,7 @@ function VolumeSlider({ label, value, onChange }: { label: string; value: number
 
 type LaunchTarget = 'bringup' | 'anima' | 'demo' | 'create_map' | 'navigation';
 
-const SIMPLE_TARGETS: LaunchTarget[] = ['bringup', 'anima', 'demo', 'create_map'];
+const SIMPLE_TARGETS: LaunchTarget[] = ['bringup', 'anima', 'demo'];
 
 export function SystemPanel({ namespace, apiUrl }: Props) {
   const [nodeList, setNodeList] = useState<string[]>([]);
@@ -112,6 +112,8 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
   const [devices, setDevices] = useState<DeviceStatus | null>(null);
   const [maps, setMaps] = useState<string[]>([]);
   const [selectedMap, setSelectedMap] = useState('');
+  // create_map起動時、既存マップの続きからSLAMを再開する場合に選ぶ(空="新規作成")
+  const [continueMap, setContinueMap] = useState('');
   const [selectedKeeput, setSelectedKeeput] = useState('');
   const [cmdLog, setCmdLog] = useState<{ time: string; msg: string; ok: boolean }[]>([]);
 
@@ -189,6 +191,19 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
     const detail = data.message || '';
     setCmdLog(prev => [{ time, msg: `${label}${detail ? ' — ' + detail : ''}`, ok: !!data.ok }, ...prev].slice(0, 50));
     fetch(`${apiUrl}/launch/status`).then(r => r.json()).then(setLaunchStatus).catch(() => {});
+
+    // create_mapを「続きから」で起動した場合、slam_toolboxが立ち上がるのを待ってから
+    // deserialize_mapを呼んでポーズグラフを読み込む(新規作成時は何もしない)
+    if (action === 'start' && target === 'create_map' && continueMap && data.ok) {
+      setTimeout(async () => {
+        const r = await fetch(`${apiUrl}/map/slam/continue`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ map_name: continueMap }),
+        }).then(r2 => r2.json()).catch(() => ({ ok: false, message: '通信エラー' }));
+        const t2 = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+        setCmdLog(prev => [{ time: t2, msg: `マップ継続(${continueMap}) — ${r.message ?? ''}`, ok: !!r.ok }, ...prev].slice(0, 50));
+      }, 5000);
+    }
   };
 
   const applyVolume = (type: 'speaker' | 'mic', value: number) => {
@@ -260,6 +275,31 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
               onStart={() => launchAction(target, 'start')}
               onStop={() => launchAction(target, 'stop')} />
           ))}
+
+          {/* create_map: 続きから選択付き */}
+          <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--t-overlay)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Dot ok={!!launchStatus['create_map']} dim />
+              <span style={{ color: 'var(--t-text)', fontSize: 13, flex: 1 }}>create_map</span>
+              <button onClick={() => launchAction('create_map', 'start')} disabled={!!launchStatus['create_map']}
+                style={{ padding: '4px 12px', borderRadius: 12, border: 'none', cursor: launchStatus['create_map'] ? 'not-allowed' : 'pointer',
+                  background: launchStatus['create_map'] ? 'var(--t-border)' : '#00cc66',
+                  color: 'var(--t-text)', fontSize: 12, opacity: launchStatus['create_map'] ? 0.5 : 1 }}>起動</button>
+              <button onClick={() => launchAction('create_map', 'stop')} disabled={!launchStatus['create_map']}
+                style={{ padding: '4px 12px', borderRadius: 12, border: 'none', cursor: !launchStatus['create_map'] ? 'not-allowed' : 'pointer',
+                  background: !launchStatus['create_map'] ? 'var(--t-border)' : '#cc3333',
+                  color: 'var(--t-text)', fontSize: 12, opacity: !launchStatus['create_map'] ? 0.5 : 1 }}>停止</button>
+            </div>
+            <div style={{ paddingLeft: 16 }}>
+              <div style={{ color: 'var(--t-text-dim)', fontSize: 11, marginBottom: 3 }}>続きから(空=新規作成)</div>
+              <select value={continueMap} onChange={e => setContinueMap(e.target.value)}
+                style={{ width: '100%', background: 'var(--t-input-bg)', color: 'var(--t-text)',
+                  border: '1px solid var(--t-border2)', borderRadius: 6, padding: '4px 6px', fontSize: 12 }}>
+                <option value="">新規作成</option>
+                {maps.map(m => <option key={m} value={m}>{m}</option>)}
+              </select>
+            </div>
+          </div>
 
           {/* navigation: マップ選択付き */}
           <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--t-overlay)' }}>

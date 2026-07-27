@@ -281,6 +281,23 @@ async def save_map(body: MapSaveBody) -> dict:
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 
+    # slam_toolboxのポーズグラフも一緒に保存しておく(あとで「続きから」再開するため)。
+    # PGM/YAMLと違い、これはSLAM実行中(create_map起動中)でないと取得できないので、
+    # SLAM停止後の保存時は静かに失敗させる(map/saveの主目的である画像保存は成功させたい)。
+    try:
+        subprocess.run(
+            [
+                'ros2', 'service', 'call', f'/{core.DEFAULT_NAMESPACE}/navigation/slam_toolbox/serialize_map',
+                'slam_toolbox/srv/SerializePoseGraph', f"{{filename: '{dest_stem}'}}"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=core.ROS_ENV,
+        )
+    except Exception:
+        pass
+
     # auto-generate keepout copy
     pgm_src = dest_dir / 'map.pgm'
     pgm_kp = dest_dir / 'map_keepout.pgm'
@@ -295,6 +312,46 @@ async def save_map(body: MapSaveBody) -> dict:
         with yaml_kp.open('w') as f:
             yaml.safe_dump(meta, f, sort_keys=False)
     return {'ok': True, 'dir': str(dest_dir)}
+
+
+class SlamContinueBody(BaseModel):
+    map_name: str
+
+
+@router.post('/map/slam/continue')
+async def continue_slam_map(body: SlamContinueBody) -> dict:
+    """既存マップの保存済みポーズグラフを読み込み、そこから続きをマッピングする.
+
+    create_map起動(SLAM)中に呼ぶこと。map/saveで一緒に保存されたポーズグラフ
+    (map/saveと同じstem)をdeserialize_mapで読み込む。ポーズグラフが無い
+    (map/save以前に作られた古いマップ等)場合はslam_toolbox側がエラーを返す。
+    START_AT_FIRST_NODE(match_type=1)で、ロボットの現在位置合わせは行わず
+    グラフの最初のノード基準で復元する(スキャンマッチングで自然に合っていく)。
+    """
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    stem = str(d / 'map')
+    try:
+        result = subprocess.run(
+            [
+                'ros2', 'service', 'call', f'/{core.DEFAULT_NAMESPACE}/navigation/slam_toolbox/deserialize_map',
+                'slam_toolbox/srv/DeserializePoseGraph',
+                f"{{filename: '{stem}', match_type: 1, initial_pose: {{x: 0.0, y: 0.0, theta: 0.0}}}}"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=core.ROS_ENV,
+        )
+        ok = 'result: 0' in result.stdout or result.returncode == 0
+        if not ok:
+            return {'ok': False, 'message': result.stderr.strip() or result.stdout.strip() or 'deserialize failed'}
+        return {'ok': True, 'message': f'{body.map_name}の続きから再開しました'}
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'message': 'timeout'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
 
 
 class RotateBody(BaseModel):
