@@ -196,7 +196,7 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
   };
 
   // コントローラのBluetooth接続状況。ペアリングボタンの表示・接続済み表示に使う
-  const [connectedControllers, setConnectedControllers] = useState<{ mac: string; name: string }[]>([]);
+  const [connectedControllers, setConnectedControllers] = useState<{ mac: string; name: string; battery: number | null }[]>([]);
   const [pairing, setPairing] = useState(false);
   useEffect(() => {
     const poll = () =>
@@ -206,6 +206,14 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
     const t = setInterval(poll, 5000);
     return () => clearInterval(t);
   }, [apiUrl]);
+  const disconnectController = async (mac: string) => {
+    const res = await fetch(`${apiUrl}/system/bluetooth/disconnect?mac=${encodeURIComponent(mac)}`, { method: 'POST' })
+      .then(r => r.json()).catch(() => ({ ok: false, message: '通信エラー' }));
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setCmdLog(prev => [{ time, msg: `コントローラ切断 — ${res.message ?? ''}`, ok: !!res.ok }, ...prev].slice(0, 50));
+    fetch(`${apiUrl}/system/bluetooth/controllers`).then(r => r.json())
+      .then(d => setConnectedControllers(d.connected || [])).catch(() => {});
+  };
   const pairController = async () => {
     setPairing(true);
     const res = await fetch(`${apiUrl}/system/bluetooth/pair`, { method: 'POST' })
@@ -311,7 +319,16 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
               {connectedControllers.map(c => (
                 <div key={c.mac} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
                   <Dot ok />
-                  <span style={{ color: 'var(--t-text)', fontSize: 12 }}>{c.name}</span>
+                  <span style={{ color: 'var(--t-text)', fontSize: 12, flex: 1 }}>{c.name}</span>
+                  {c.battery !== null && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--t-text-dim)', fontSize: 11 }}>
+                      <Icon name="battery_full" size={13} />{c.battery}%
+                    </span>
+                  )}
+                  <button onClick={() => disconnectController(c.mac)} title="切断" style={{
+                    padding: '2px 8px', borderRadius: 10, border: 'none', cursor: 'pointer',
+                    background: 'var(--t-border)', color: 'var(--t-text)', fontSize: 10,
+                  }}>切断</button>
                 </div>
               ))}
             </div>

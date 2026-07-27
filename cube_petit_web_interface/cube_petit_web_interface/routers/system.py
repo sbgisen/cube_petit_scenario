@@ -159,18 +159,52 @@ def _parse_bluetoothctl_devices(stdout: str) -> list[dict]:
     return devices
 
 
+async def _get_battery_percentage(mac: str) -> int | None:
+    """`bluetoothctl info <mac>`のBattery Percentage行を読む.
+
+    BlueZのBattery Service(GATT)経由の値で、機種によっては公開されない
+    (例: PS4 Wireless Controllerはクラシック接続のみだと出ないことが多い)。
+    その場合はNoneを返す(フロントエンドは残量欄を単に表示しない)。
+    """
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'info', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
+        m = re.search(r'Battery Percentage:.*\((\d+)%\)', r.stdout)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
 @router.get('/system/bluetooth/controllers')
 async def get_bluetooth_controllers() -> dict:
-    """接続中のコントローラ(PS4/PS5/Xbox等)一覧を返す."""
+    """接続中のコントローラ(PS4/PS5/Xbox等)一覧を返す(取得できればバッテリー残量も)."""
     try:
         r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Connected'],
                                     capture_output=True,
                                     text=True,
                                     timeout=5)
         connected = [d for d in _parse_bluetoothctl_devices(r.stdout) if _is_controller_name(d['name'])]
+        for dev in connected:
+            dev['battery'] = await _get_battery_percentage(dev['mac'])
         return {'connected': connected}
     except Exception as e:
         return {'connected': [], 'error': str(e)}
+
+
+@router.post('/system/bluetooth/disconnect')
+async def disconnect_bluetooth_controller(mac: str) -> dict:
+    """指定したコントローラをBluetooth切断する(ペア情報は保持、再接続はペアリングボタンから)."""
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'disconnect', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10)
+        ok = 'Successful disconnected' in r.stdout or r.returncode == 0
+        return {'ok': ok, 'message': (r.stdout or r.stderr).strip()}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
 
 
 @router.post('/system/bluetooth/pair')
