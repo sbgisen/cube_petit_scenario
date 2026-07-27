@@ -177,6 +177,21 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
   }, [apiUrl]);
   const runMode = deriveRunMode(launchStatus);
   const runModeInfo = RUN_MODE_INFO[runMode];
+  // 目標/初期(goal_pose・initialposeの送信)はナビゲーションかSLAMが動いていないと
+  // 意味を成さないため、マップ作成/自律移動モードのときだけ押せるようにする
+  const canSetNavGoals = runMode === 'map_creation' || runMode === 'autonomous';
+
+  // これらのモードに入った瞬間、地図フレーム(mapTF)をデフォルトにする(以後の
+  // 手動選択は維持し、モードが変わるまで上書きしない)
+  useEffect(() => {
+    if (canSetNavGoals) {
+      setMapFrame('map');
+    } else {
+      // マップ作成/自律移動モードから外れたら、目標/初期モードのままにしない
+      setMapMode(m => (m === 'goal' || m === 'initialpose') ? 'view' : m);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runMode]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflow: 'hidden', position: 'relative' }}>
@@ -207,14 +222,20 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         <div style={{ display: 'flex', gap: 6 }}>
           {/* 操作/目標モード */}
           <div style={{ display: 'flex', background: '#222', borderRadius: 20, overflow: 'hidden' }}>
-            {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期']] as [MapMode, string][]).map(([m, label]) => (
-              <button key={m} onClick={() => handleSetMapMode(m)} style={{
-                padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13,
-                background: mapMode === m ? '#0088ff' : 'transparent', color: '#fff',
-              }}>
-                {label}
-              </button>
-            ))}
+            {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期']] as [MapMode, string][]).map(([m, label]) => {
+              const disabled = m !== 'view' && !canSetNavGoals;
+              return (
+                <button key={m} onClick={() => !disabled && handleSetMapMode(m)} disabled={disabled} title={
+                  disabled ? 'マップ作成/自律移動モードのときだけ使えます' : undefined
+                } style={{
+                  padding: '6px 14px', border: 'none', fontSize: 13,
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  background: mapMode === m ? '#0088ff' : 'transparent', color: disabled ? '#777' : '#fff',
+                }}>
+                  {label}
+                </button>
+              );
+            })}
           </div>
           {/* 2D/3D */}
           <div style={{ display: 'flex', background: '#222', borderRadius: 20, overflow: 'hidden' }}>
