@@ -179,16 +179,28 @@ async def _get_battery_percentage(mac: str) -> int | None:
 
 @router.get('/system/bluetooth/controllers')
 async def get_bluetooth_controllers() -> dict:
-    """接続中のコントローラ(PS4/PS5/Xbox等)一覧を返す(取得できればバッテリー残量も)."""
+    """コントローラ(PS4/PS5/Xbox等)一覧を返す(取得できればバッテリー残量も).
+
+    BlueZの"Connected"判定はHIDプロファイルが実際に繋がっていなくてもtrueに
+    なることがあり(逆に不安定なこともある)、あまり厳密には信用できない。
+    ペアリング済み(Paired)の中から名前がコントローラらしきものを拾い、
+    別途Connected一覧と突き合わせて connected フラグを付けて返す方式にした。
+    """
     try:
-        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Connected'],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=5)
-        connected = [d for d in _parse_bluetoothctl_devices(r.stdout) if _is_controller_name(d['name'])]
-        for dev in connected:
-            dev['battery'] = await _get_battery_percentage(dev['mac'])
-        return {'connected': connected}
+        r_paired = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Paired'],
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=5)
+        r_connected = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Connected'],
+                                              capture_output=True,
+                                              text=True,
+                                              timeout=5)
+        connected_macs = {d['mac'] for d in _parse_bluetoothctl_devices(r_connected.stdout)}
+        controllers = [d for d in _parse_bluetoothctl_devices(r_paired.stdout) if _is_controller_name(d['name'])]
+        for dev in controllers:
+            dev['connected'] = dev['mac'] in connected_macs
+            dev['battery'] = await _get_battery_percentage(dev['mac']) if dev['connected'] else None
+        return {'connected': controllers}
     except Exception as e:
         return {'connected': [], 'error': str(e)}
 
@@ -250,12 +262,10 @@ async def pair_bluetooth_controller() -> dict:
         connected = []
         for dev in candidates:
             mac = dev['mac']
-            # ボンディングされないまま残った古いペア情報があると再ペアがno-opになるため、
-            # 一度removeしてから作り直す(接続済みの場合は無害にスキップされる)。
-            await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'remove', mac],
-                                    capture_output=True,
-                                    text=True,
-                                    timeout=5)
+            # removeしてから即pairすると、コントローラがまだ再検出可能な状態で
+            # advertiseし続けている保証がなく「Device not available」で失敗しうる
+            # (実機で確認)。removeはせず、agent登録済みの状態でそのままpairし直す
+            # (既存の中途半端なペア情報があってもpairはボンディングをやり直す)。
             await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'pair', mac],
                                     capture_output=True,
                                     text=True,

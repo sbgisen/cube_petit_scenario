@@ -211,7 +211,7 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
   };
 
   // コントローラのBluetooth接続状況。ペアリングボタンの表示・接続済み表示に使う
-  const [connectedControllers, setConnectedControllers] = useState<{ mac: string; name: string; battery: number | null }[]>([]);
+  const [connectedControllers, setConnectedControllers] = useState<{ mac: string; name: string; battery: number | null; connected: boolean }[]>([]);
   const [pairing, setPairing] = useState(false);
   useEffect(() => {
     const poll = () =>
@@ -358,8 +358,10 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
             <div style={{ display: 'flex', flexDirection: 'column', gap: 4, marginBottom: 8 }}>
               {connectedControllers.map(c => (
                 <div key={c.mac} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                  <Dot ok />
-                  <span style={{ color: 'var(--t-text)', fontSize: 12, flex: 1 }}>{c.name}</span>
+                  <Dot ok={c.connected} />
+                  <span style={{ color: 'var(--t-text)', fontSize: 12, flex: 1 }}>
+                    {c.name}{!c.connected && <span style={{ color: 'var(--t-text-dim)' }}>(ペア済み・未接続)</span>}
+                  </span>
                   {c.battery !== null && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--t-text-dim)', fontSize: 11 }}>
                       <Icon name="battery_full" size={13} />{c.battery}%
