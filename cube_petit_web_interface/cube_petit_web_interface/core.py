@@ -35,9 +35,11 @@ if TYPE_CHECKING:
 
 try:
     # uvicorn cube_petit_web_interface.api_server:app で起動した場合
+    from cube_petit_web_interface import fleet_zenoh
     from cube_petit_web_interface import helpers
 except ImportError:
     # python api_server.py で直接実行した場合
+    import fleet_zenoh  # noqa: F401  (routers から core.fleet_zenoh として参照される)
     import helpers  # noqa: F401  (routers から core.helpers として参照される)
 
 ROS_ENV = {**os.environ, 'RMW_IMPLEMENTATION': 'rmw_cyclonedds_cpp'}
@@ -92,6 +94,14 @@ _node: Optional['Node'] = None
 _tf_buffer = None
 _tf_listener = None
 _ros_thread: Optional[threading.Thread] = None
+
+# Tier 2: fleet-wide multi-robot picker (see fleet_zenoh.py). Independent of
+# the rclpy watcher above -- a plain eclipse-zenoh client session, not a ROS node.
+ZENOH_ROUTER_ENDPOINT = os.environ.get('ZENOH_ROUTER_ENDPOINT', fleet_zenoh.DEFAULT_ZENOH_ENDPOINT)
+ZENOH_MODE = os.environ.get('ZENOH_MODE', fleet_zenoh.DEFAULT_ZENOH_MODE)
+_fleet_watcher: Optional['fleet_zenoh.FleetZenohWatcher'] = None
+_fleet_error: Optional[str] = None
+_fleet_zenoh_thread: Optional[threading.Thread] = None
 
 processes: dict[str, Optional[subprocess.Popen]] = {
     'rosbridge': None,
@@ -175,13 +185,53 @@ def start_ros_thread() -> None:
     _ros_thread.start()
 
 
+def _start_fleet_zenoh() -> None:
+    """Open the fleet zenoh watcher (runs in its own thread; see start_fleet_zenoh_thread)."""
+    global _fleet_watcher, _fleet_error
+    watcher = fleet_zenoh.FleetZenohWatcher(ZENOH_ROUTER_ENDPOINT, ZENOH_MODE)
+    try:
+        watcher.start()
+    except Exception as error:  # noqa: BLE001 - Tier 2 must degrade gracefully, never break Tier 1
+        _fleet_error = str(error)
+        return
+    _fleet_watcher = watcher
+
+
+def start_fleet_zenoh_thread() -> None:
+    """Tier 2 のフリート監視スレッドを起動する（多重起動はしない・失敗しても例外を投げない）."""
+    global _fleet_zenoh_thread, _fleet_error
+    if _fleet_zenoh_thread is not None:
+        return
+    if fleet_zenoh.zenoh is None:
+        _fleet_error = ("The 'eclipse-zenoh' pip package is not installed; the multi-robot picker "
+                        '(Tier 2) is disabled. See cube_petit_web_interface/requirements.txt.')
+        return
+    _fleet_zenoh_thread = threading.Thread(target=_start_fleet_zenoh, daemon=True)
+    _fleet_zenoh_thread.start()
+
+
+def get_fleet_state() -> dict:
+    """フリート監視の最新スナップショットを返す（未起動/利用不可なら空 dict）."""
+    if _fleet_watcher is None:
+        return {}
+    return _fleet_watcher.snapshot()
+
+
+def get_fleet_error() -> Optional[str]:
+    """フリート監視が使えない理由（正常なら None）."""
+    return _fleet_error
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_ros_thread()
+    start_fleet_zenoh_thread()
     yield
     for proc in processes.values():
         if proc and proc.poll() is None:
             proc.terminate()
+    if _fleet_watcher is not None:
+        _fleet_watcher.close()
 
 
 def get_robot_pose(namespace: str) -> Optional[list[float]]:

@@ -22,6 +22,7 @@ cube_petit_web_interface/
 │       │   ├── MapView3D.tsx      # 3D マップ（Three.js）
 │       │   ├── Joystick.tsx       # 仮想ジョイスティック
 │       │   ├── CameraView.tsx     # カメラ映像
+│       │   ├── RobotPicker.tsx    # Tier 2: 複数ロボット同時閲覧ピッカー（5タブの上に表示）
 │       │   └── QuickPhraseGrid.tsx
 │       └── hooks/
 │           ├── useRosConnection.ts
@@ -41,7 +42,10 @@ cube_petit_web_interface/
 │   │   ├── map_router.py      #   /map/*（マップ管理・places/rooms・保存・回転）
 │   │   ├── places.py          #   /places/*（グローバル places.yaml）
 │   │   ├── prompt.py          #   /prompt/*
-│   │   └── history.py         #   /history/*
+│   │   ├── history.py         #   /history/*
+│   │   └── fleet.py           #   /fleet/robots（Tier 2: 複数ロボット状態集約）
+│   ├── fleet_zenoh.py         # Tier 2: zenoh セッション・購読管理（要 eclipse-zenoh）
+│   ├── fleet_zenoh_logic.py   # Tier 2 の純粋ヘルパー（zenoh 非依存、単体テスト対象）
 │   └── internal_state_relay.py
 └── img/                       # ロボットアイコン画像
 ```
@@ -321,6 +325,50 @@ CAN0・LiDAR・IMU・CANable・RealSense・OAK の接続状態を表示。
 
 `{ns}` は接続先ロボットの hostname (`cube_petit_<color>`) から動的に導出される
 （`GET /system/namespace` で取得。命名規則に沿わないホストでは `cube_petit_orange` にフォールバック）。
+
+---
+
+## 複数ロボット同時閲覧（Tier 2 マルチロボットピッカー）
+
+5タブの上に、zenoh フリートネットワーク上で見えている全ロボットを一覧表示するピッカーが出る
+（`cube_petit_fleet_bridge`（別リポジトリ `cube_petit_ros`）の `zenoh_connector` ノードが
+`robots/<robot_name>/{pose,battery,map_name}` を publish している前提）。
+
+**対称なpeer設計**: 単一の「ハブ」インスタンスは存在しない。どのロボットの web_interface を
+開いても、自分自身を含む同じ全体像が見える。ピッカーのカードをクリックすると、Tier 1 の
+host 切り替え（画面上部の IP 入力）と同じ仕組みでそのロボットへワンクリック切り替えできる
+（クリックしたロボット名を `<color>` として `cube-petit-<color>.local` を host に設定する。
+mDNS 解決に依存するため、解決できない環境では手動で IP を入力し直すこと）。
+
+### 前提: eclipse-zenoh のインストール
+
+**`pip` ではなく `uv` を使うこと**（このマシンでは素の `pip install` が失敗するため）:
+
+```bash
+cd ~/ros/src/cube_petit_scenario/cube_petit_web_interface
+uv pip install --system -r requirements.txt
+```
+
+未インストール、または zenoh ルーター（既定 `tcp/cube-petit-orange.local:7447`、
+`sbgisen/cube_petit_setup#43` 参照）に到達できない場合、ピッカーは自動的に非表示になる
+（`GET /fleet/robots` の `available: false`）。Tier 1（1台ずつの host 切り替え）はその場合でも
+通常どおり動作する。
+
+### 設定（環境変数、任意）
+
+| 環境変数 | 既定値 | 用途 |
+|---------|--------|------|
+| `ZENOH_ROUTER_ENDPOINT` | `tcp/cube-petit-orange.local:7447` | 接続先 zenoh ルーター |
+| `ZENOH_MODE` | `client` | zenoh セッションモード（`client` / `peer`） |
+
+### API
+
+| メソッド | パス | 内容 |
+|---------|------|------|
+| GET | `/fleet/robots` | `{available, error, robots: {robot_name: {pose, battery, map_name, online, last_seen_sec_ago}}}` |
+
+`command` / `command_is_completed` キーは購読しない（他ロボットへのコマンド送信はこの機能の
+スコープ外。あくまで状態の可視化のみ）。
 
 ---
 

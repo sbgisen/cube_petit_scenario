@@ -5,6 +5,7 @@ DELETE /places/remove remove_place
 DELETE /prompt delete_prompt
 GET /action/exists action_exists
 GET /audio/volume get_audio_volume
+GET /fleet/robots get_fleet_robots
 GET /history/list list_history
 GET /launch/status get_status
 GET /map/image get_map_image

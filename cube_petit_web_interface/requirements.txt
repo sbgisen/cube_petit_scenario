@@ -1,0 +1,10 @@
+# Not resolvable via rosdep on jazzy/noble (checked: `rosdep resolve python3-zenoh` fails;
+# same finding as cube_petit_fleet_bridge/requirements.txt and
+# cube_petit_shared_controller/requirements.txt, which use this same pip package).
+# Only needed for the Tier 2 multi-robot picker (fleet_zenoh.py); Tier 1
+# (single-robot operation) works fine without it. Install with uv (plain pip is
+# unreliable in this environment -- use uv, not pip):
+#   uv pip install --system -r requirements.txt
+# or inside a uv-managed venv:
+#   uv venv && uv pip install -r requirements.txt
+eclipse-zenoh>=1.0.0
