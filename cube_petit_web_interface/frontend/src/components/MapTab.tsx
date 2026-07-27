@@ -1041,7 +1041,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
 
         {/* Google Maps風: 右下にズーム+/-と現在地ボタン、縮尺バー */}
         {mapImg && (
-          <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 8 }}>
+          <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
             {scaleBar && (
               <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
                 <span style={{ fontSize: 10, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '1px 6px', borderRadius: 6 }}>
@@ -1055,26 +1055,27 @@ export function MapTab({ namespace, apiUrl }: Props) {
               disabled={!robotPose}
               title="現在地に戻る"
               style={{
-                width: 34, height: 34, borderRadius: '50%', border: 'none',
+                width: 46, height: 46, borderRadius: '50%', border: '1px solid #fff',
                 cursor: robotPose ? 'pointer' : 'not-allowed',
-                background: 'rgba(0,0,0,0.55)', color: robotPose ? '#00ff88' : '#666',
+                background: 'rgba(0,0,0,0.6)', color: robotPose ? '#00ff88' : '#666',
                 display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
               }}
             >
-              <Icon name="my_location" size={18} />
+              <Icon name="my_location" size={24} />
             </button>
-            <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 10, overflow: 'hidden', background: 'rgba(0,0,0,0.55)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden', background: 'rgba(0,0,0,0.6)', border: '1px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
               <button
                 onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
                 title="ズームイン"
-                style={{ width: 34, height: 30, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              ><Icon name="add" size={18} /></button>
-              <div style={{ height: 1, background: 'rgba(255,255,255,0.25)' }} />
+                style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="add" size={22} /></button>
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.35)' }} />
               <button
                 onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
                 title="ズームアウト"
-                style={{ width: 34, height: 30, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
-              ><Icon name="remove" size={18} /></button>
+                style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="remove" size={22} /></button>
             </div>
           </div>
         )}
