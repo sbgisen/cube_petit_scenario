@@ -26,6 +26,10 @@ if ! command -v uv >/dev/null 2>&1; then
 fi
 uv venv --system-site-packages --clear "$VENV_DIR"
 uv pip install --python "$VENV_DIR/bin/python" -r "$WEBIF_DIR/requirements.txt"
+# requirements.txt は Tier 2(zenoh)専用で、fastapi/uvicorn/pyyaml 等の基本依存は
+# 「rosdep/apt で入ってる前提」だったが、機体によっては入っていないため明示的に入れる
+# (--system-site-packages なので、既に入ってる機体では何もしない)
+uv pip install --python "$VENV_DIR/bin/python" fastapi "uvicorn[standard]" pyyaml pydantic
 "$VENV_DIR/bin/python" -c "import zenoh, fastapi, uvicorn, rclpy; print('venv OK: zenoh/fastapi/uvicorn/rclpy import成功')"
 
 echo "== 2. Node.js / npm install (frontend) =="
