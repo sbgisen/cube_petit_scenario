@@ -216,6 +216,17 @@ async def pair_bluetooth_controller() -> dict:
     見つからなければその旨を返す(呼び出し元でユーザーに再試行を促す)。
     """
     try:
+        # agentを登録しないと pair は「見た目はPaired」でも正しくボンディングされず、
+        # bluetoothdがHID接続を "Rejected connection from !bonded device" で拒否する
+        # (実機で確認: Paired: yes だが Bonded: no のまま接続が通らないケースがあった)。
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'agent', 'NoInputNoOutput'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5)
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'default-agent'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5)
         await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'power', 'on'],
                                 capture_output=True,
                                 text=True,
@@ -239,6 +250,12 @@ async def pair_bluetooth_controller() -> dict:
         connected = []
         for dev in candidates:
             mac = dev['mac']
+            # ボンディングされないまま残った古いペア情報があると再ペアがno-opになるため、
+            # 一度removeしてから作り直す(接続済みの場合は無害にスキップされる)。
+            await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'remove', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
             await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'pair', mac],
                                     capture_output=True,
                                     text=True,
