@@ -905,23 +905,6 @@ export function MapTab({ namespace, apiUrl }: Props) {
           </select>
         </div>
 
-        {/* 他機に共有 */}
-        {fleetRobotNames.length > 0 && (
-          <div style={cardStyle}>
-            <SectionTitle>他機に共有</SectionTitle>
-            <select value={shareTarget} onChange={e => setShareTarget(e.target.value)}
-              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12, marginBottom: 6, width: '100%' }}>
-              <option value="">-- 送信先を選択 --</option>
-              {fleetRobotNames.map(n => <option key={n} value={n}>{n}</option>)}
-            </select>
-            <button onClick={shareMap} disabled={sharing || !selectedMap || !shareTarget}
-              style={{ ...btnStyle(), background: sharing ? 'var(--t-border)' : 'var(--t-accent)', color: '#fff', width: '100%',
-                opacity: (!selectedMap || !shareTarget) ? 0.5 : 1 }}>
-              {sharing ? '送信中...' : `📤 ${selectedMap || '(マップ未選択)'} を送る`}
-            </button>
-          </div>
-        )}
-
         {/* SLAM保存 */}
         <div style={cardStyle}>
           <SectionTitle>作成中マップを編集</SectionTitle>
@@ -1262,6 +1245,23 @@ export function MapTab({ namespace, apiUrl }: Props) {
             {rooms.length === 0 && <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>なし</div>}
           </div>
         </div>
+
+        {/* 他機に共有(右下) */}
+        {fleetRobotNames.length > 0 && (
+          <div style={cardStyle}>
+            <SectionTitle>他機に共有</SectionTitle>
+            <select value={shareTarget} onChange={e => setShareTarget(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12, marginBottom: 6, width: '100%' }}>
+              <option value="">-- 送信先を選択 --</option>
+              {fleetRobotNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button onClick={shareMap} disabled={sharing || !selectedMap || !shareTarget}
+              style={{ ...btnStyle(), background: sharing ? 'var(--t-border)' : 'var(--t-accent)', color: '#fff', width: '100%',
+                opacity: (!selectedMap || !shareTarget) ? 0.5 : 1 }}>
+              {sharing ? '送信中...' : `📤 ${selectedMap || '(マップ未選択)'} を送る`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );
