@@ -212,7 +212,7 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
   };
 
   return (
-    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gridTemplateRows: '8fr 1fr', gap: 16, padding: 8, height: '100%', overflow: 'hidden' }}>
+    <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gridTemplateRows: '2fr 1fr', gap: 16, padding: 8, height: '100%', overflow: 'hidden' }}>
 
       {/* 起動管理: 左上 2列 */}
       <div style={{ ...cardStyle, gridColumn: '1 / 3', gridRow: '1' }}>
