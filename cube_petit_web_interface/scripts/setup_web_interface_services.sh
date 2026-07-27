@@ -24,7 +24,7 @@ if ! command -v uv >/dev/null 2>&1; then
   curl -LsSf https://astral.sh/uv/install.sh | sh
   export PATH="$HOME/.local/bin:$PATH"
 fi
-uv venv --system-site-packages "$VENV_DIR"
+uv venv --system-site-packages --clear "$VENV_DIR"
 uv pip install --python "$VENV_DIR/bin/python" -r "$WEBIF_DIR/requirements.txt"
 "$VENV_DIR/bin/python" -c "import zenoh, fastapi, uvicorn, rclpy; print('venv OK: zenoh/fastapi/uvicorn/rclpy import成功')"
 
