@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from './Icon';
 
 const WATCHED_NODES = [
   'ldlidar_publisher_ld06',
@@ -192,6 +193,17 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
     fetch(`${apiUrl}/audio/volume?type=${type}&value=${value}`, { method: 'POST' }).catch(() => {});
   };
 
+  const [canRestarting, setCanRestarting] = useState(false);
+  const restartCan = async () => {
+    setCanRestarting(true);
+    const res = await fetch(`${apiUrl}/system/can/restart`, { method: 'POST' })
+      .then(r => r.json()).catch(() => ({ ok: false, message: '通信エラー' }));
+    const time = new Date().toLocaleTimeString('ja-JP', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+    setCmdLog(prev => [{ time, msg: `CAN0再起動 — ${res.message ?? ''}`, ok: !!res.ok }, ...prev].slice(0, 50));
+    setCanRestarting(false);
+    fetch(`${apiUrl}/system/devices`).then(r => r.json()).then(setDevices).catch(() => {});
+  };
+
   return (
     <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr 1fr 2fr', gridTemplateRows: '1fr 1fr', gap: 16, padding: 8, height: '100%', overflow: 'hidden' }}>
 
@@ -301,6 +313,21 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
             {devices?.can0 && !devices?.can_stale && (devices?.can_errors ?? 0) > 0 && (
               <span style={{ fontSize: 11, color: '#ff6644', background: 'rgba(255,100,68,0.15)', borderRadius: 4, padding: '1px 6px' }}>エラー {devices.can_errors}</span>
             )}
+            <div style={{ flex: 1 }} />
+            <button
+              onClick={restartCan}
+              disabled={canRestarting}
+              title="Canableが止まっている・CAN0が受信停止のときに再起動します(can@ttyCANable.service)"
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '3px 10px', borderRadius: 10, border: 'none',
+                cursor: canRestarting ? 'not-allowed' : 'pointer', fontSize: 11,
+                background: (!devices?.can0 || devices?.can_stale) ? '#cc3333' : 'var(--t-border)',
+                color: '#fff', opacity: canRestarting ? 0.6 : 1,
+              }}
+            >
+              <Icon name="restart_alt" size={13} />
+              {canRestarting ? '再起動中...' : 'CAN再起動'}
+            </button>
           </div>
           <DeviceRow label="LiDAR"     ok={devices?.lidar     ?? false} />
           <DeviceRow label="IMU"       ok={devices?.imu       ?? false} />

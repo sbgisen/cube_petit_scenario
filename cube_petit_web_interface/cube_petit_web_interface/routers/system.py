@@ -106,6 +106,27 @@ async def get_system_devices() -> dict:
     return result
 
 
+@router.post('/system/can/restart')
+async def restart_can() -> dict:
+    """CAN0(slcand経由のCANable)を再起動する.
+
+    can@ttyCANable.serviceの`startCan.sh`は自身のhealth-checkでslcandプロセスの
+    生死とcan0インターフェースの有無しか見ておらず、slcandもcan0も生きたまま
+    フレームを受信しなくなる("止まっているのに気づけない")ケースを検知できない。
+    この手動リスタートはそのケースの救済用(操作タブのCAN0受信停止表示から呼ぶ)。
+    """
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['sudo', 'systemctl', 'restart', 'can@ttyCANable.service'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=15)
+        if r.returncode == 0:
+            return {'ok': True, 'message': 'CAN0を再起動しました'}
+        return {'ok': False, 'message': (r.stderr or r.stdout).strip() or f'exit code {r.returncode}'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+
+
 @router.get('/ros/nodes')
 async def get_ros_nodes() -> dict:
     try:
