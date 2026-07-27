@@ -32,6 +32,9 @@ interface Props {
 
 const POLL_MS = 1000;
 const CHASE_PERIOD_MS = 3000;
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 10;
+const ZOOM_BUTTON_FACTOR = 1.3;
 
 export function FleetDashboard({ apiUrl }: Props) {
   const [maps, setMaps] = useState<string[]>([]);
@@ -46,6 +49,12 @@ export function FleetDashboard({ apiUrl }: Props) {
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const panStart = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
+
+  // ロック中はパン/ズーム/クリックでの目標地点指定を無効化(デモ中に画面が触られて
+  // 誤操作するのを防ぐ)。ズーム+/-・全体表示ボタン自体は明示操作なのでロック中も有効
+  const [mapLocked, setMapLocked] = useState(false);
+  const mapLockedRef = useRef(false);
+  mapLockedRef.current = mapLocked;
 
   const [targetPoint, setTargetPoint] = useState<{ x: number; y: number } | null>(null);
 
@@ -178,7 +187,9 @@ export function FleetDashboard({ apiUrl }: Props) {
   useEffect(() => { render(); }, [render]);
 
   // ---- マウス操作(左クリック=目標地点セット、中クリック/ドラッグ=パン、ホイール=ズーム) ----
+  // ロック中はクリック/ドラッグ/ホイールを無視する(誤操作防止)
   const onMouseDown = (e: React.MouseEvent) => {
+    if (mapLockedRef.current) return;
     if (e.button === 1 || (e.button === 0 && e.altKey)) {
       panStart.current = { mx: e.clientX, my: e.clientY, px: pan.x, py: pan.y }; return;
     }
@@ -193,15 +204,36 @@ export function FleetDashboard({ apiUrl }: Props) {
   const onMouseUp = () => { panStart.current = null; };
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
+    if (mapLockedRef.current) return;
     const f = e.deltaY < 0 ? 1.1 : 0.9;
     const rect = canvasRef.current!.getBoundingClientRect();
     const cx = e.clientX - rect.left, cy = e.clientY - rect.top;
     setScale(s => {
-      const ns = Math.max(0.1, Math.min(10, s * f));
+      const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * f));
       setPan(p => ({ x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) }));
       return ns;
     });
   };
+
+  // Google Maps風ズーム+/-(明示ボタン操作なのでロック中も有効)
+  const zoomBy = useCallback((factor: number) => {
+    const cont = containerRef.current;
+    if (!cont) return;
+    const cx = cont.clientWidth / 2, cy = cont.clientHeight / 2;
+    setScale(s => {
+      const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * factor));
+      setPan(p => ({ x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) }));
+      return ns;
+    });
+  }, []);
+
+  const fitToView = useCallback(() => {
+    if (!mapImg || !containerRef.current) return;
+    const c = containerRef.current;
+    const s = Math.min(c.clientWidth / mapImg.width, c.clientHeight / mapImg.height, 1);
+    setScale(s);
+    setPan({ x: (c.clientWidth - mapImg.width * s) / 2, y: (c.clientHeight - mapImg.height * s) / 2 });
+  }, [mapImg]);
 
   // ---- コマンド送信 ----
   const sendMoveToPose = async (robotName: string, x: number, y: number, yaw: number) => {
@@ -275,6 +307,16 @@ export function FleetDashboard({ apiUrl }: Props) {
               このマップ上: {onlineRobotsOnMap.length}台
             </span>
           )}
+          <button
+            onClick={() => setMapLocked(v => !v)}
+            title={mapLocked ? 'ロック中(クリック/ドラッグ/ズーム無効)' : 'ロック解除'}
+            style={{
+              display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', borderRadius: 8, border: 'none', cursor: 'pointer',
+              background: mapLocked ? 'var(--t-accent)' : 'var(--t-surface2)', color: mapLocked ? '#fff' : 'var(--t-text)', fontSize: 12,
+            }}
+          >
+            <Icon name={mapLocked ? 'lock' : 'lock_open'} size={15} />
+          </button>
         </div>
         {msg && (
           <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '6px 16px', borderRadius: 12, fontSize: 12, zIndex: 10, whiteSpace: 'nowrap' }}>
@@ -301,7 +343,35 @@ export function FleetDashboard({ apiUrl }: Props) {
             }}><Icon name="close" size={16} /></button>
           </div>
         )}
-        <div ref={containerRef} style={{ position: 'absolute', inset: 0 }}>
+        {/* Google Maps風: 右下に全体表示・ズーム+/- */}
+        {mapImg && (
+          <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={fitToView}
+              title="全体表示"
+              style={{
+                width: 46, height: 46, borderRadius: '50%', border: '1px solid #fff', cursor: 'pointer',
+                background: 'rgba(0,0,0,0.6)', color: '#fff',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+              }}
+            ><Icon name="fit_screen" size={22} /></button>
+            <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden', background: 'rgba(0,0,0,0.6)', border: '1px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+              <button
+                onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
+                title="ズームイン"
+                style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="add" size={22} /></button>
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.35)' }} />
+              <button
+                onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
+                title="ズームアウト"
+                style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="remove" size={22} /></button>
+            </div>
+          </div>
+        )}
+        <div ref={containerRef} style={{ position: 'absolute', inset: 0, cursor: mapLocked ? 'not-allowed' : undefined }}>
           <canvas ref={canvasRef}
             style={{ width: '100%', height: '100%', cursor: 'crosshair' }}
             onMouseDown={onMouseDown} onMouseMove={onMouseMove} onMouseUp={onMouseUp} onMouseLeave={onMouseUp}
