@@ -1,23 +1,18 @@
 import { useEffect, useState } from 'react';
 import { Icon } from './Icon';
 
-// launch/statusのターゲット(bringup/demo/...)ごとに、健全性チェック対象ノードを分けて表示する
-const WATCHED_NODE_GROUPS: { label: string; nodes: string[] }[] = [
-  {
-    label: 'bringup',
-    nodes: [
-      'robot_state_publisher',
-      'ldlidar_publisher_ld06',
-      'diff_drive_controller',
-      'socket_can_receiver',
-      'socket_can_sender',
-      'respeaker_node',
-    ],
-  },
-  {
-    label: 'demo',
-    nodes: ['realtime_gpt_chat', 'speech_action_server', 'text_to_jtalk'],
-  },
+// 健全性チェック対象ノード一覧(bringup/demoのグループ分けはせず、丸の位置を揃えて
+// 1本のグリッドで表示する)
+const WATCHED_NODES: string[] = [
+  'robot_state_publisher',
+  'ldlidar_publisher_ld06',
+  'diff_drive_controller',
+  'socket_can_receiver',
+  'socket_can_sender',
+  'respeaker_node',
+  'realtime_gpt_chat',
+  'speech_action_server',
+  'text_to_jtalk',
 ];
 
 interface DeviceStatus {
@@ -346,21 +341,14 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
         </div>
       </div>
 
-      {/* ノード監視: デバイスの右 3列。launchターゲット(bringup/demo/...)ごとにグループ表示 */}
+      {/* ノード監視: デバイスの右 3列。グリッドで丸の位置を縦に揃える */}
       <div style={{ ...cardStyle, gridColumn: '2 / 5', gridRow: '2', overflow: 'auto' }}>
         <SectionTitle>ノード監視 <span style={{ fontSize: 11, color: 'var(--t-text-dim)', fontWeight: 'normal' }}>({namespace})</span></SectionTitle>
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-          {WATCHED_NODE_GROUPS.map(group => (
-            <div key={group.label} style={{ display: 'flex', alignItems: 'baseline', gap: 12, flexWrap: 'wrap' }}>
-              <span style={{ fontSize: 11, color: 'var(--t-text-dim)', minWidth: 56, flexShrink: 0 }}>{group.label}</span>
-              <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 18px' }}>
-                {group.nodes.map(node => (
-                  <div key={node} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-                    <Dot ok={isAlive(node)} />
-                    <span style={{ color: 'var(--t-text)', fontSize: 12 }}>{node}</span>
-                  </div>
-                ))}
-              </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: '6px 18px' }}>
+          {WATCHED_NODES.map(node => (
+            <div key={node} style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <Dot ok={isAlive(node)} />
+              <span style={{ color: 'var(--t-text)', fontSize: 12 }}>{node}</span>
             </div>
           ))}
         </div>
