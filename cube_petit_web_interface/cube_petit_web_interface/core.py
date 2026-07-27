@@ -92,9 +92,6 @@ PROTECTED_HISTORY = {'history.jsonl'}
 # hostname (cube_petit_<color>) から動的に導出する。cube_petit_bringup.launch.py の
 # face_color 導出と同じ発想（PR #102参照）。routers 側のデフォルト値もここから参照する。
 DEFAULT_NAMESPACE = helpers.resolve_namespace()
-# 'cube_petit_orange' -> 'orange'。create_map/navigationの機体別launchファイル名の
-# 選択に使う(LAUNCH_COMMANDS参照)。
-_ROBOT_COLOR = DEFAULT_NAMESPACE.removeprefix('cube_petit_')
 WATCHED_NAMESPACES = [DEFAULT_NAMESPACE]
 status_cache: dict[str, dict] = {ns: {'is_active': False, 'can_receive_message': False} for ns in WATCHED_NAMESPACES}
 _node: Optional['Node'] = None
@@ -138,13 +135,15 @@ LAUNCH_COMMANDS = {
          'share/cube_petit_chat/config/gpt_tools/infer_object/infer_object.txt'),
     ],
     'anima': ['ros2', 'launch', 'cube_petit_anima', 'anima.launch.py'],
-    # create_map_<color>.launch.py / navigation_<color>.launch.py は機体ごとの薄いラッパー
-    # (pinkはSLAMパラメータ・スキャントピックも独自設定のため、単純にrobot引数を渡すだけの
-    # 汎用launchに一本化できない)。以前は_orange固定で、pink/yellowで実行してもcube_petit_orange
-    # 名前空間でslam_toolbox/navigationが立ち上がり、地図が全く見えない不具合があった
-    # (2026-07-27判明)。DEFAULT_NAMESPACEから機体色を導出して動的に選ぶ。
-    'create_map': ['ros2', 'launch', 'cube_petit_navigation', f'create_map_{_ROBOT_COLOR}.launch.py'],
-    'navigation': ['ros2', 'launch', 'cube_petit_navigation', f'navigation_{_ROBOT_COLOR}.launch.py'],
+    # create_map.launch.py / navigation.launch.py は自身のhostnameからrobot名前空間を
+    # 自動導出する(cube_petit_ros側、2026-07-27)。以前は機体別の薄いラッパー
+    # (create_map_orange.launch.py等)を機体色で動的に選んでいたが、hostname自動導出に
+    # 一本化してラッパーファイル自体を廃止した。
+    # create_map.launch.py / navigation.launch.py auto-derive their robot namespace from
+    # hostname (see cube_petit_ros, 2026-07-27); the per-robot wrapper launch files this
+    # used to select dynamically (create_map_orange.launch.py, etc.) have been removed.
+    'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map.launch.py'],
+    'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation.launch.py'],
 }
 
 # 各launchが起動中かを判定するノード名（部分一致）
