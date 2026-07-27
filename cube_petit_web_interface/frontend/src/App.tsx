@@ -57,18 +57,28 @@ function applyAccent(namespace: string | null) {
 }
 applyAccent(null);
 
-const DEFAULT_QUICK_PHRASES = ['こんにちは', 'こっちきて', 'オレンジプチです', '仲良くしてね'];
-const QUICK_PHRASES_KEY = 'quick_phrases';
+// クイックフレーズは機体(namespace)ごとに保存する。以前は単一キーで全機体共有だったため、
+// どの機体を見ていても「オレンジプチです」が既定文言として出てしまっていた。
+// Quick phrases are saved per robot (namespace). They used to share a single localStorage
+// key across every robot, so the self-intro default always said "I'm Orange Petit" no matter
+// which robot was actually selected.
+function defaultQuickPhrases(namespace: string): string[] {
+  const intro = namespace ? `${nicknameForRobot(namespace)}です` : 'オレンジプチです';
+  return ['こんにちは', 'こっちきて', intro, '仲良くしてね'];
+}
+function quickPhrasesKey(namespace: string): string {
+  return `quick_phrases_${namespace || 'default'}`;
+}
 
-function loadQuickPhrases(): string[] {
+function loadQuickPhrases(namespace: string): string[] {
   try {
-    const raw = localStorage.getItem(QUICK_PHRASES_KEY);
+    const raw = localStorage.getItem(quickPhrasesKey(namespace));
     if (raw) {
       const parsed = JSON.parse(raw);
       if (Array.isArray(parsed) && parsed.length > 0) return parsed;
     }
   } catch { /* ignore */ }
-  return [...DEFAULT_QUICK_PHRASES];
+  return defaultQuickPhrases(namespace);
 }
 
 const HOST_HISTORY_KEY = 'robot_host_history';
@@ -209,10 +219,16 @@ export default function App() {
     setTimeout(() => fetch(`${apiUrl}/launch/status`).then(r => r.json()).then(d => setRosbridgeRunning(!!d.rosbridge)).catch(() => {}), 1500);
   };
 
-  const [quickPhrases, setQuickPhrasesState] = useState<string[]>(loadQuickPhrases);
+  const [quickPhrases, setQuickPhrasesState] = useState<string[]>(() => loadQuickPhrases(robot.namespace));
+  // 機体切替(host切替でnamespaceが変わる)のたびに、その機体用に保存されたクイックフレーズへ
+  // 読み直す。Reload quick phrases for the newly selected robot whenever namespace changes.
+  useEffect(() => {
+    setQuickPhrasesState(loadQuickPhrases(robot.namespace));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [namespace]);
   const setQuickPhrases = (phrases: string[]) => {
     setQuickPhrasesState(phrases);
-    localStorage.setItem(QUICK_PHRASES_KEY, JSON.stringify(phrases));
+    localStorage.setItem(quickPhrasesKey(robot.namespace), JSON.stringify(phrases));
   };
 
   const connect = () => {
