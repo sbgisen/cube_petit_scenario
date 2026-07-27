@@ -146,6 +146,28 @@ LAUNCH_NODE_MARKERS = {
 }
 
 
+async def get_launch_status() -> dict:
+    """各launchターゲットが実際に起動中かを返す.
+
+    自プロセス管理下か、systemdサービス等の外部起動かを問わない。
+    `/launch/status` と `start_launch` の「既に起動中か」判定を共通化するために切り出した。
+    以前は `start_launch` が `processes[target]` （このAPIサーバー自身が起動したものだけ）
+    しか見ておらず、systemd の `cube-petit-bringup.service` 等で外部起動されている状態を
+    検知できずに二重起動してしまうバグがあった（同名ノードの重複でロボットが不安定になる）。
+    """
+    try:
+        node_output = await get_node_list_output()
+        own_ns_prefix = f'/{DEFAULT_NAMESPACE}/'
+        own_nodes = [line for line in node_output.splitlines() if line.startswith(own_ns_prefix)]
+        status = {}
+        for target, marker in LAUNCH_NODE_MARKERS.items():
+            proc_alive = processes[target] is not None and processes[target].poll() is None
+            status[target] = proc_alive or any(marker in line for line in own_nodes)
+        return status
+    except Exception:
+        return {target: proc is not None and proc.poll() is None for target, proc in processes.items()}
+
+
 def get_node() -> Optional['Node']:
     """常駐ノードを返す（未起動なら None）."""
     return _node

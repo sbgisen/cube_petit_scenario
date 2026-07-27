@@ -91,7 +91,21 @@ async def get_system_devices() -> dict:
     # シリアルデバイス（udevシンボリックリンク）
     result['lidar'] = os.path.exists('/dev/ttyLD06-19')
     result['imu'] = os.path.exists('/dev/ttyWitMotion')
+    # /dev/ttyCANableのudevルールはCANable2(idVendor=16d0, idProduct=117e)専用で、
+    # 別機種のCANableボード(例: pinkのProtofusion Labs製、CANtactファーム、
+    # idVendor=ad50)ではシンボリックリンクが作られず誤って「未検出」になる。
+    # 実体はslcandプロセスの有無(ボード機種によらずCAN0を動かしていれば必ず居る)
+    # で代替検出する。
     result['canable'] = os.path.exists('/dev/ttyCANable')
+    if not result['canable']:
+        try:
+            r = await asyncio.to_thread(subprocess.run, ['pgrep', '-x', 'slcand'],
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=3)
+            result['canable'] = r.returncode == 0
+        except Exception:
+            pass
 
     # USB接続（lsusb）
     try:
