@@ -18,6 +18,18 @@ VENV_DIR="$WEBIF_DIR/.venv"
 SYSTEMD_DIR="$HOME/.config/systemd/user"
 ENV_FILE="$SYSTEMD_DIR/cube-petit-api.env"
 
+# ROS環境を先にsourceしておく(PYTHONPATHにrclpy等が乗る)。以降のvenv importチェックや
+# 4章のenvファイル生成でも使う。一部のROS setup.bash群がunbound variableを参照するため
+# source中だけ set -u を緩める
+set +u
+source /opt/ros/jazzy/setup.bash
+source "$HOME/ros/install/setup.bash"
+set -u
+export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
+export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
+export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-94}"
+export DISPLAY="${DISPLAY:-:0}"
+
 echo "== 1. Python venv + eclipse-zenoh (uv) =="
 if ! command -v uv >/dev/null 2>&1; then
   echo "uv が無いので入れます"
@@ -53,14 +65,6 @@ if [ -f "$ENV_FILE" ]; then
   EXTRA_LINES="$(grep -vE "$KNOWN_KEYS" "$ENV_FILE" || true)"
 fi
 
-set +u  # ROSのsetup.bash群がunbound variableを参照するため、source中だけ緩める
-source /opt/ros/jazzy/setup.bash
-source "$HOME/ros/install/setup.bash"
-set -u
-export RMW_IMPLEMENTATION=rmw_cyclonedds_cpp
-export ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET
-export ROS_DOMAIN_ID="${ROS_DOMAIN_ID:-94}"
-export DISPLAY="${DISPLAY:-:0}"
 env | grep -E "$KNOWN_KEYS" > "$ENV_FILE"
 if [ -n "$EXTRA_LINES" ]; then
   echo "$EXTRA_LINES" >> "$ENV_FILE"
