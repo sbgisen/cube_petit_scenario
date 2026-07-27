@@ -245,6 +245,79 @@ export function FleetDashboard({ apiUrl }: Props) {
     }
   };
   const onMouseUp = () => { panStart.current = null; draftDraggingRef.current = false; };
+
+  // ---- タッチ操作(スマホ/タブレット): 1本指=マウスドラッグと同じ挙動、2本指=ピンチズーム ----
+  const touchPinchRef = useRef<number | null>(null);
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+
+    const onTouchStart = (e: TouchEvent) => {
+      if (mapLockedRef.current) return;
+      if (e.touches.length === 2) {
+        e.preventDefault();
+        touchPinchRef.current = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        return;
+      }
+      if (e.touches.length !== 1 || !mapImg) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (interactionMode === 'gather') {
+        const { px, py } = screenToPx(t.clientX, t.clientY);
+        setTargetPoint(pxToWorld(px, py));
+      } else if ((interactionMode === 'goal' || interactionMode === 'localize') && actionRobot) {
+        const { px, py } = screenToPx(t.clientX, t.clientY);
+        const w = pxToWorld(px, py);
+        setDraft({ x: w.x, y: w.y, yaw: 0 });
+        draftDraggingRef.current = true;
+      } else {
+        panStart.current = { mx: t.clientX, my: t.clientY, px: pan.x, py: pan.y };
+      }
+    };
+
+    const onTouchMove = (e: TouchEvent) => {
+      if (mapLockedRef.current) return;
+      if (e.touches.length === 2 && touchPinchRef.current !== null) {
+        e.preventDefault();
+        const dist = Math.hypot(
+          e.touches[0].clientX - e.touches[1].clientX, e.touches[0].clientY - e.touches[1].clientY);
+        const factor = dist / touchPinchRef.current;
+        touchPinchRef.current = dist;
+        setScale(s => Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * factor)));
+        return;
+      }
+      if (e.touches.length !== 1) return;
+      e.preventDefault();
+      const t = e.touches[0];
+      if (panStart.current) {
+        setPan({ x: panStart.current.px + t.clientX - panStart.current.mx, y: panStart.current.py + t.clientY - panStart.current.my });
+        return;
+      }
+      if (draftDraggingRef.current) {
+        const { px, py } = screenToPx(t.clientX, t.clientY);
+        const w = pxToWorld(px, py);
+        setDraft(d => d ? { ...d, yaw: Math.atan2(w.y - d.y, w.x - d.x) } : d);
+      }
+    };
+
+    const onTouchEnd = () => {
+      touchPinchRef.current = null;
+      panStart.current = null;
+      draftDraggingRef.current = false;
+    };
+
+    canvas.addEventListener('touchstart', onTouchStart, { passive: false });
+    canvas.addEventListener('touchmove', onTouchMove, { passive: false });
+    canvas.addEventListener('touchend', onTouchEnd);
+    canvas.addEventListener('touchcancel', onTouchEnd);
+    return () => {
+      canvas.removeEventListener('touchstart', onTouchStart);
+      canvas.removeEventListener('touchmove', onTouchMove);
+      canvas.removeEventListener('touchend', onTouchEnd);
+      canvas.removeEventListener('touchcancel', onTouchEnd);
+    };
+  }, [mapImg, pan, scale, interactionMode, actionRobot, screenToPx, pxToWorld]);
   const onWheel = (e: React.WheelEvent) => {
     e.preventDefault();
     if (mapLockedRef.current) return;
