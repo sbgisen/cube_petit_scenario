@@ -11,7 +11,7 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-"""システム情報 API (/system/devices, /action/exists, /ros/nodes, /ros/robot_pose)."""
+"""システム情報 API (/system/devices, /system/namespace, /action/exists, /ros/nodes, /ros/robot_pose)."""
 
 import asyncio
 import os
@@ -44,6 +44,12 @@ async def action_exists(name: str) -> dict:
         return {'exists': found}
     except Exception:
         return {'exists': False}
+
+
+@router.get('/system/namespace')
+async def get_namespace() -> dict:
+    """接続先ロボットの ROS 名前空間 (hostname 由来) をフロントエンドに返す."""
+    return {'namespace': core.DEFAULT_NAMESPACE}
 
 
 @router.get('/system/devices')
@@ -111,7 +117,7 @@ async def get_ros_nodes() -> dict:
 
 
 @router.get('/ros/robot_pose')
-async def get_robot_pose_endpoint(namespace: str = 'cube_petit_orange') -> dict:
+async def get_robot_pose_endpoint(namespace: str = core.DEFAULT_NAMESPACE) -> dict:
     pose = core.get_robot_pose(namespace)
     if pose is None:
         return {'ok': False}

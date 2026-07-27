@@ -61,7 +61,7 @@ async def set_prompt(body: PromptBody, file: Optional[str] = None) -> dict:
 
 
 @router.post('/prompt/activate')
-async def activate_prompt(file: str, namespace: str = 'cube_petit_orange') -> dict:
+async def activate_prompt(file: str, namespace: str = core.DEFAULT_NAMESPACE) -> dict:
     src = core.PROMPT_DIR / file
     if not src.exists():
         return {'ok': False, 'error': 'File not found'}

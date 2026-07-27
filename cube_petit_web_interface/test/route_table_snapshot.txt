@@ -20,6 +20,7 @@ GET /ros/conversation/status get_conversation_status
 GET /ros/nodes get_ros_nodes
 GET /ros/robot_pose get_robot_pose_endpoint
 GET /system/devices get_system_devices
+GET /system/namespace get_namespace
 GET,HEAD /docs swagger_ui_html
 GET,HEAD /docs/oauth2-redirect swagger_ui_redirect
 GET,HEAD /openapi.json openapi

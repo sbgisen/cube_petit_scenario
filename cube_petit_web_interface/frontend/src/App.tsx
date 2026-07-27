@@ -8,7 +8,6 @@ import { MapTab } from './components/MapTab';
 import type { RobotConfig } from './types/ros';
 
 const DEFAULT_HOST = window.location.hostname;
-const NAMESPACE = 'cube_petit_orange';
 
 const DARK_VARS: Record<string, string> = {
   '--t-bg':          '#0d0d1a',
@@ -77,12 +76,26 @@ export default function App() {
   const [inputHost, setInputHost] = useState<string>(host);
   const inputRef = useRef<HTMLInputElement>(null);
 
+  const apiUrl = `http://${host}:8000`;
+
+  // 名前空間は接続先ロボット (host) の hostname 由来で変わるため、host が確定/切替される
+  // たびに再取得する。取得できるまでは null（下の描画でローディング扱い）。
+  const [namespace, setNamespace] = useState<string | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    setNamespace(null);
+    fetch(`${apiUrl}/system/namespace`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d.namespace) setNamespace(d.namespace); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [apiUrl]);
+
   const robot: RobotConfig = {
     name: 'オレンジプチ',
-    namespace: NAMESPACE,
+    namespace: namespace ?? '',
     rosbridgeUrl: `ws://${host}:9090`,
   };
-  const apiUrl = `http://${host}:8000`;
 
   const [tab, setTab] = useState<Tab>('operation');
   const { ros, status } = useRosConnection(robot.rosbridgeUrl);
@@ -219,11 +232,19 @@ export default function App() {
 
       {/* コンテンツ */}
       <div style={{ flex: 1, padding: 12, overflow: 'hidden', minHeight: 0 }}>
-        {tab === 'operation' && <OperationTab ros={ros} namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
-        {tab === 'talk'      && <TalkTab      ros={ros} namespace={robot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} apiUrl={apiUrl} />}
-        {tab === 'system'    && <SystemPanel  namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
-        {tab === 'map'       && <MapTab       namespace={robot.namespace} apiUrl={apiUrl} />}
-        {tab === 'custom'    && <CustomTab    apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+        {namespace === null ? (
+          <div style={{ padding: 24, textAlign: 'center', color: 'var(--t-text-dim)' }}>
+            名前空間を取得中...
+          </div>
+        ) : (
+          <>
+            {tab === 'operation' && <OperationTab ros={ros} namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+            {tab === 'talk'      && <TalkTab      ros={ros} namespace={robot.namespace} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} apiUrl={apiUrl} />}
+            {tab === 'system'    && <SystemPanel  namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+            {tab === 'map'       && <MapTab       namespace={robot.namespace} apiUrl={apiUrl} />}
+            {tab === 'custom'    && <CustomTab    apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
+          </>
+        )}
       </div>
     </div>
   );

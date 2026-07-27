@@ -57,6 +57,25 @@ class TestParseAmixerVolume:
         assert helpers.parse_amixer_volume('[100%]') == 100
 
 
+# --- 名前空間 (hostname -> namespace) ---
+
+
+class TestResolveNamespace:
+
+    def test_color_hostname(self) -> None:
+        assert helpers.resolve_namespace('cube_petit_pink') == 'cube_petit_pink'
+
+    def test_hyphenated_hostname(self) -> None:
+        assert helpers.resolve_namespace('cube-petit-yellow') == 'cube_petit_yellow'
+
+    def test_non_matching_hostname_falls_back(self) -> None:
+        assert helpers.resolve_namespace('dev-laptop') == 'cube_petit_orange'
+
+    def test_default_uses_actual_hostname(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(helpers.socket, 'gethostname', lambda: 'cube_petit_lilac')
+        assert helpers.resolve_namespace() == 'cube_petit_lilac'
+
+
 # --- places.yaml ---
 
 

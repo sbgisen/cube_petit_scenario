@@ -35,7 +35,7 @@ cube_petit_web_interface/
 │   ├── helpers.py             # 純粋ヘルパー関数（rclpy / FastAPI 非依存）
 │   ├── routers/               # ドメイン別 APIRouter
 │   │   ├── launch.py          #   /launch/*（launch 制御）
-│   │   ├── system.py          #   /system/devices, /action/exists, /ros/nodes, /ros/robot_pose
+│   │   ├── system.py          #   /system/devices, /system/namespace, /action/exists, /ros/nodes, /ros/robot_pose
 │   │   ├── conversation.py    #   /ros/conversation/*
 │   │   ├── audio.py           #   /audio/volume
 │   │   ├── map_router.py      #   /map/*（マップ管理・places/rooms・保存・回転）
@@ -319,7 +319,8 @@ CAN0・LiDAR・IMU・CANable・RealSense・OAK の接続状態を表示。
 | Pub | `/{ns}/navigation/initialpose` | `geometry_msgs/PoseWithCovarianceStamped` |
 | Action | `/{ns}/speech_action_server` | `cube_petit_speech_msgs/action/Speech` |
 
-`{ns}` のデフォルト: `cube_petit_orange`
+`{ns}` は接続先ロボットの hostname (`cube_petit_<color>`) から動的に導出される
+（`GET /system/namespace` で取得。命名規則に沿わないホストでは `cube_petit_orange` にフォールバック）。
 
 ---
 
