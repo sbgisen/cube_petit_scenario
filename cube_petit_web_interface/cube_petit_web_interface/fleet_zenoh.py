@@ -76,8 +76,9 @@ class FleetZenohWatcher:
     def __init__(self, endpoint: str = DEFAULT_ZENOH_ENDPOINT, mode: str = DEFAULT_ZENOH_MODE) -> None:
         if zenoh is None:
             raise RuntimeError("The 'eclipse-zenoh' pip package is not installed. Install it with "
-                               '`pip install --break-system-packages eclipse-zenoh` (see '
-                               f'cube_petit_web_interface/requirements.txt). Original error: {_ZENOH_IMPORT_ERROR}')
+                               '`uv pip install --system eclipse-zenoh` (plain pip is unreliable here; '
+                               'see cube_petit_web_interface/requirements.txt). '
+                               f'Original error: {_ZENOH_IMPORT_ERROR}')
         self._endpoint = endpoint
         self._mode = mode
         self._lock = threading.Lock()

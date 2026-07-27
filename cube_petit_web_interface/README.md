@@ -342,9 +342,11 @@ mDNS 解決に依存するため、解決できない環境では手動で IP �
 
 ### 前提: eclipse-zenoh のインストール
 
+**`pip` ではなく `uv` を使うこと**（このマシンでは素の `pip install` が失敗するため）:
+
 ```bash
 cd ~/ros/src/cube_petit_scenario/cube_petit_web_interface
-pip install --break-system-packages -r requirements.txt
+uv pip install --system -r requirements.txt
 ```
 
 未インストール、または zenoh ルーター（既定 `tcp/cube-petit-orange.local:7447`、
