@@ -193,6 +193,37 @@ export function FleetDashboard({ apiUrl }: Props) {
       ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 2 / scale; ctx.stroke();
     }
 
+    // 追いかけっこペア: chaserからtargetへの矢印(誰が誰を追っているか一目で分かるように、
+    // chaserの色で点線+矢先を描く)
+    if (fleet?.robots) {
+      for (const pair of chasePairs) {
+        const chaserRobot = fleet.robots[pair.chaser];
+        const targetRobot = fleet.robots[pair.target];
+        if (!chaserRobot?.pose || !targetRobot?.pose) continue;
+        if (chaserRobot.map_name !== selectedMap || targetRobot.map_name !== selectedMap) continue;
+        const from = worldToPx(chaserRobot.pose.x, chaserRobot.pose.y);
+        const to = worldToPx(targetRobot.pose.x, targetRobot.pose.y);
+        const color = colorForRobot(pair.chaser);
+        const angle = Math.atan2(to.py - from.py, to.px - from.px);
+        const headLen = 12 / scale;
+        ctx.beginPath();
+        ctx.moveTo(from.px, from.py);
+        ctx.lineTo(to.px, to.py);
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 2.5 / scale;
+        ctx.setLineDash([6 / scale, 5 / scale]);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.beginPath();
+        ctx.moveTo(to.px, to.py);
+        ctx.lineTo(to.px - headLen * Math.cos(angle - Math.PI / 6), to.py - headLen * Math.sin(angle - Math.PI / 6));
+        ctx.lineTo(to.px - headLen * Math.cos(angle + Math.PI / 6), to.py - headLen * Math.sin(angle + Math.PI / 6));
+        ctx.closePath();
+        ctx.fillStyle = color;
+        ctx.fill();
+      }
+    }
+
     // 各ロボット(このマップにいるもののみ)
     if (fleet?.robots) {
       for (const [name, robot] of Object.entries(fleet.robots)) {
@@ -215,7 +246,7 @@ export function FleetDashboard({ apiUrl }: Props) {
       }
     }
     ctx.restore();
-  }, [mapImg, scale, pan, rotation, fleet, targetPoint, draft, selectedMap, worldToPx]);
+  }, [mapImg, scale, pan, rotation, fleet, targetPoint, draft, selectedMap, worldToPx, chasePairs]);
 
   useEffect(() => {
     const canvas = canvasRef.current, cont = containerRef.current;
@@ -426,40 +457,37 @@ export function FleetDashboard({ apiUrl }: Props) {
     setDraft(null);
   };
 
-  // ---- 追いかけっこモード(複数ペアを自由に組める) ----
-  const fleetRef = useRef(fleet);
-  fleetRef.current = fleet;
-  const chasePairsRef = useRef(chasePairs);
-  chasePairsRef.current = chasePairs;
-
-  const addChasePair = () => {
-    if (!newChaser || !newTarget || newChaser === newTarget) return;
-    setChasePairs(prev => prev.some(p => p.chaser === newChaser && p.target === newTarget)
-      ? prev
-      : [...prev, { id: `${newChaser}::${newTarget}::${prev.length}`, chaser: newChaser, target: newTarget }]);
-    setNewChaser(''); setNewTarget('');
-  };
-  const removeChasePair = (id: string) => setChasePairs(prev => prev.filter(p => p.id !== id));
-
-  const chaseActive = chasePairs.length > 0;
+  // ---- 追いかけっこモード(複数ペアを自由に組める。ループ自体は常駐APIサーバー側で
+  // 3秒ごとに回っており、ここではサーバーの状態(GET /fleet/chase/list)をポーリングして
+  // 表示するだけ。ブラウザがタブを離れても停止しない) ----
   useEffect(() => {
-    if (!chaseActive) return;
-    const tick = async () => {
-      const f = fleetRef.current;
-      for (const pair of chasePairsRef.current) {
-        const chaserRobot = f?.robots[pair.chaser];
-        const targetRobot = f?.robots[pair.target];
-        if (!targetRobot?.pose || !targetRobot.online) continue;
-        const cp = chaserRobot?.pose;
-        const yaw = cp ? Math.atan2(targetRobot.pose.y - cp.y, targetRobot.pose.x - cp.x) : targetRobot.pose.yaw;
-        await sendMoveToPose(pair.chaser, targetRobot.pose.x, targetRobot.pose.y, yaw);
-      }
-    };
-    tick();
-    const timer = setInterval(tick, CHASE_PERIOD_MS);
-    return () => clearInterval(timer);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [chaseActive]);
+    let cancelled = false;
+    const poll = () =>
+      fetch(`${apiUrl}/fleet/chase/list`).then(r => r.json())
+        .then(d => { if (!cancelled) setChasePairs(d.pairs ?? []); }).catch(() => {});
+    poll();
+    const t = setInterval(poll, POLL_MS);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [apiUrl]);
+
+  const addChasePair = async () => {
+    if (!newChaser || !newTarget || newChaser === newTarget) return;
+    const res = await fetch(`${apiUrl}/fleet/chase/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chaser: newChaser, target: newTarget }),
+    }).then(r => r.json()).catch(() => ({ ok: false, error: '通信エラー' }));
+    if (res.ok) {
+      setNewChaser(''); setNewTarget('');
+    } else {
+      showMsg(`ペアの追加に失敗: ${res.error ?? ''}`);
+    }
+  };
+
+  const removeChasePair = async (id: string) => {
+    const res = await fetch(`${apiUrl}/fleet/chase/stop?pair_id=${encodeURIComponent(id)}`, { method: 'POST' })
+      .then(r => r.json()).catch(() => ({ ok: false }));
+    if (!res.ok) showMsg('ペアの停止に失敗しました');
+  };
 
   const allRobotNames = Object.keys(fleet?.robots ?? {}).sort();
   const offMapRobots = Object.entries(fleet?.robots ?? {}).filter(([, r]) => r.map_name !== selectedMap);
@@ -665,7 +693,17 @@ export function FleetDashboard({ apiUrl }: Props) {
                     display: 'flex', alignItems: 'center', gap: 6, fontSize: 12,
                     background: 'var(--t-surface2)', padding: '6px 10px', borderRadius: 8,
                   }}>
-                    <span style={{ flex: 1, color: 'var(--t-text)' }}>{nicknameForRobot(p.chaser)} → {nicknameForRobot(p.target)}</span>
+                    <span style={{ flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 4 }}>
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 10, color: '#fff', fontWeight: 'bold',
+                        background: colorForRobot(p.chaser), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }} title="追いかける側(chaser)">{nicknameForRobot(p.chaser)}</span>
+                      <Icon name="arrow_forward" size={14} />
+                      <span style={{
+                        padding: '2px 8px', borderRadius: 10, color: '#fff', fontWeight: 'bold',
+                        background: colorForRobot(p.target), whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis',
+                      }} title="追いかけられる側(target)">{nicknameForRobot(p.target)}</span>
+                    </span>
                     <button onClick={() => removeChasePair(p.id)} title="このペアを停止" style={{
                       width: 22, height: 22, borderRadius: '50%', border: 'none', cursor: 'pointer',
                       background: '#cc3333', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
