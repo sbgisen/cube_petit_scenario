@@ -114,6 +114,7 @@ processes: dict[str, Optional[subprocess.Popen]] = {
     'anima': None,
     'create_map': None,
     'navigation': None,
+    'shared_controller_hub': None,
 }
 
 LAUNCH_COMMANDS = {
@@ -144,6 +145,13 @@ LAUNCH_COMMANDS = {
     # used to select dynamically (create_map_orange.launch.py, etc.) have been removed.
     'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map.launch.py'],
     'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation.launch.py'],
+    # 1台のPS4/PS5コントローラを複数ロボットで使い回す仕組み(共有コントローラ)の
+    # hub役。物理接続したこの機体からのコントローラ入力を他機(receiver役、bringupに
+    # 統合済みで常時起動中)へ配信する。role/robot_names/toggle_buttonsはstart_launch内で
+    # 動的に付与する(navigationのmap:=/keepout:=と同じパターン)。
+    # ベースコマンドの末尾(launch file名)は _kill_by_launch_file の検索キーに
+    # 使われるため変更しないこと。
+    'shared_controller_hub': ['ros2', 'launch', 'cube_petit_shared_controller', 'shared_controller.launch.py'],
 }
 
 # 各launchが起動中かを判定するノード名（部分一致）
@@ -154,6 +162,7 @@ LAUNCH_NODE_MARKERS = {
     'anima': 'behavior_node',
     'create_map': 'slam_toolbox',
     'navigation': 'emcl',
+    'shared_controller_hub': 'controller_hub_node',
 }
 
 

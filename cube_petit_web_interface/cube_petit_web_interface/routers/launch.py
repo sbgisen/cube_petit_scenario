@@ -65,6 +65,14 @@ async def start_launch(
             kp_yaml = str(kp_dir / 'map_keepout.yaml') if kp_dir else keepout
             cmd.append(f'keepout:={kp_yaml}')
             log_msg += f' keepout:={kp_yaml}'
+    elif target == 'shared_controller_hub':
+        # この機体をhub役(コントローラ物理接続側)として起動する。他機は常時receiver役
+        # (bringupに統合済み)。robot_names/toggle_buttonsの対応順はcube_petit_shared_controller
+        # 側の割り当てに合わせる。
+        cmd.append('role:=hub')
+        cmd.append('robot_names:=cube_petit_orange,cube_petit_pink,cube_petit_yellow')
+        cmd.append('toggle_buttons:=2,1,3')
+        log_msg += ' role:=hub robot_names:=cube_petit_orange,cube_petit_pink,cube_petit_yellow toggle_buttons:=2,1,3'
     core.processes[target] = subprocess.Popen(cmd, env=core.ROS_ENV, preexec_fn=os.setsid)
     return LaunchResponse(ok=True, message=log_msg)
 

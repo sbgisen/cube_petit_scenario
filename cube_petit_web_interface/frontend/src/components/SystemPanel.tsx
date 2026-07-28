@@ -100,7 +100,7 @@ function VolumeSlider({ label, value, onChange }: { label: string; value: number
   );
 }
 
-type LaunchTarget = 'bringup' | 'anima' | 'demo' | 'create_map' | 'navigation';
+type LaunchTarget = 'bringup' | 'anima' | 'demo' | 'create_map' | 'navigation' | 'shared_controller_hub';
 
 const SIMPLE_TARGETS: LaunchTarget[] = ['bringup', 'anima', 'demo'];
 
@@ -333,6 +333,26 @@ export function SystemPanel({ namespace, apiUrl }: Props) {
                   {maps.map(m => <option key={m} value={m}>{m}</option>)}
                 </select>
               </div>
+            </div>
+          </div>
+
+          {/* shared_controller_hub: 1台のコントローラを複数機で使い回す仕組みのhub役 */}
+          <div style={{ padding: '8px 10px', borderRadius: 8, background: 'var(--t-overlay)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 6 }}>
+              <Dot ok={!!launchStatus['shared_controller_hub']} dim />
+              <span style={{ color: 'var(--t-text)', fontSize: 13, flex: 1 }}>共有コントローラ(hub)</span>
+              <button onClick={() => launchAction('shared_controller_hub', 'start')} disabled={!!launchStatus['shared_controller_hub']}
+                style={{ padding: '4px 12px', borderRadius: 12, border: 'none', cursor: launchStatus['shared_controller_hub'] ? 'not-allowed' : 'pointer',
+                  background: launchStatus['shared_controller_hub'] ? 'var(--t-border)' : '#00cc66',
+                  color: 'var(--t-text)', fontSize: 12, opacity: launchStatus['shared_controller_hub'] ? 0.5 : 1 }}>起動</button>
+              <button onClick={() => launchAction('shared_controller_hub', 'stop')} disabled={!launchStatus['shared_controller_hub']}
+                style={{ padding: '4px 12px', borderRadius: 12, border: 'none', cursor: !launchStatus['shared_controller_hub'] ? 'not-allowed' : 'pointer',
+                  background: !launchStatus['shared_controller_hub'] ? 'var(--t-border)' : '#cc3333',
+                  color: 'var(--t-text)', fontSize: 12, opacity: !launchStatus['shared_controller_hub'] ? 0.5 : 1 }}>停止</button>
+            </div>
+            <div style={{ paddingLeft: 16, color: 'var(--t-text-dim)', fontSize: 11, lineHeight: 1.6 }}>
+              <div>この機体に接続したコントローラで他の機体を操作します(hub役)。</div>
+              <div>この機体は常に他機から操作を受け付けています(receiver常時稼働中)。</div>
             </div>
           </div>
         </div>
