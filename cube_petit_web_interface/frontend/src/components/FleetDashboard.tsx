@@ -99,11 +99,11 @@ export function FleetDashboard({ apiUrl }: Props) {
     img.src = `${apiUrl}/map/image?map_name=${encodeURIComponent(selectedMap)}&type=map&t=${Date.now()}`;
   }, [apiUrl, selectedMap]);
 
-  // ---- fit on load ----
+  // ---- fit on load(等倍上限を設けず、常にコンテナいっぱいに収まる最大サイズで表示する) ----
   useEffect(() => {
     if (!mapImg || !containerRef.current) return;
     const c = containerRef.current;
-    const s = Math.min(c.clientWidth / mapImg.width, c.clientHeight / mapImg.height, 1);
+    const s = Math.min(c.clientWidth / mapImg.width, c.clientHeight / mapImg.height);
     setScale(s);
     setPan({ x: (c.clientWidth - mapImg.width * s) / 2, y: (c.clientHeight - mapImg.height * s) / 2 });
   }, [mapImg]);
@@ -350,27 +350,29 @@ export function FleetDashboard({ apiUrl }: Props) {
     });
   };
 
-  // Google Maps風ズーム+/-(明示ボタン操作なのでロック中も有効)。
-  // 画面中心ではなく「現在表示中のマップ画像の中心」を基準にズームする(マップが画面の
-  // 隅に寄った状態で+/-を連打しても画面外へ逃げていかないように)。回転は画像の中心を軸に
-  // かけているので、この中心のスクリーン座標は回転の影響を受けず pan/scale だけで求まる
+  // Google Maps風ズーム+/-(明示ボタン操作なのでロック中も有効)。今画面(canvas)に
+  // 見えている表示領域の中心を固定点にしてズームする(onWheelのマウス位置基準ズームと
+  // 同じ考え方で、基準点をcontainerの中心に固定したもの)。この計算はスクリーン座標系
+  // だけで完結する(screenToPxを経由しない)ので、回転(rotation)があっても影響を受けない。
+  // ※マップ画像自体の中心ではない: マップを隅にパンして見ている状態では画像の中心は
+  // 画面外にあり、そちらを基準にすると「今見えている場所」からズレて見えてしまう
   const zoomBy = useCallback((factor: number) => {
-    if (!mapImg) return;
+    const cont = containerRef.current;
+    if (!cont) return;
+    const cx = cont.clientWidth / 2, cy = cont.clientHeight / 2;
     setScale(s => {
       const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * factor));
-      setPan(p => {
-        const cx = p.x + (mapImg.width * s) / 2, cy = p.y + (mapImg.height * s) / 2;
-        return { x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) };
-      });
+      setPan(p => ({ x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) }));
       return ns;
     });
-  }, [mapImg]);
+  }, []);
 
-  // マップの中心に画面を戻す(+ズーム・回転もリセットして全体表示)
+  // マップの中心に画面を戻す(+ズーム・回転もリセットして全体表示。等倍上限は設けず、
+  // 常にコンテナいっぱいに収まる最大サイズで表示する)
   const fitToView = useCallback(() => {
     if (!mapImg || !containerRef.current) return;
     const c = containerRef.current;
-    const s = Math.min(c.clientWidth / mapImg.width, c.clientHeight / mapImg.height, 1);
+    const s = Math.min(c.clientWidth / mapImg.width, c.clientHeight / mapImg.height);
     setScale(s);
     setRotation(0);
     setPan({ x: (c.clientWidth - mapImg.width * s) / 2, y: (c.clientHeight - mapImg.height * s) / 2 });
