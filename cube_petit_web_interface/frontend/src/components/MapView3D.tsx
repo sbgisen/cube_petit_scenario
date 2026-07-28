@@ -160,14 +160,14 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     body.position.y = 0.11;
     robotGroup.add(body);
 
-    // 前方ノーズ: 前方(+x)に突き出た三角錐。ロボットの向きはこれ単体で示す
-    // (以前はArrowHelperも併用していたが、ノーズと向きの表現が重複するため撤去)
-    const noseMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
-    const nose = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 4), noseMat);
-    nose.rotation.z = -Math.PI / 2; // x軸方向に向ける
-    nose.rotation.y = Math.PI / 4;  // 四角錐の向きを整える
-    nose.position.set(0.19, 0.11, 0);
-    robotGroup.add(nose);
+    // 上部の前方方向ライン (地面からでも見えるよう高めに)。ロボットの向きはこれ単体で示す
+    // (以前は前方ノーズ(三角錐)も併用していたが、向きの表現が重複するため撤去)
+    const fwdArrow = new THREE.ArrowHelper(
+      new THREE.Vector3(1, 0, 0),
+      new THREE.Vector3(0, 0.26, 0),
+      0.55, 0xffffff, 0.18, 0.12
+    );
+    robotGroup.add(fwdArrow);
 
     scene.add(robotGroup);
 
