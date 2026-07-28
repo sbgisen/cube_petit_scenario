@@ -142,19 +142,25 @@ export function RobotPicker({ apiUrl, currentNamespace, onSelectRobot }: Props) 
               background: robot.online ? colorForRobot(name) : '#555555',
               boxShadow: robot.online ? `0 0 4px ${colorForRobot(name)}88` : 'none',
             }} />
-            <span style={{ flex: 1 }}>{nicknameForRobot(name)}</span>
-            {batteryPct != null && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--t-text-dim)', fontSize: 12 }} title="バッテリー残量">
-                <Icon name={batteryIconName(batteryPct)} size={16} />
-                {batteryPct}%
-              </span>
-            )}
-            {robot.map_name && (
-              <span style={{ display: 'flex', alignItems: 'center', gap: 2, color: 'var(--t-text-dim)', fontSize: 12 }} title="使用中のマップ">
-                <Icon name="map" size={16} />
-                {robot.map_name}
-              </span>
-            )}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span>{nicknameForRobot(name)}</span>
+              {(batteryPct != null || robot.map_name) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--t-text-dim)', fontSize: 12 }}>
+                  {batteryPct != null && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 2 }} title="バッテリー残量">
+                      <Icon name={batteryIconName(batteryPct)} size={14} />
+                      {batteryPct}%
+                    </span>
+                  )}
+                  {robot.map_name && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="使用中のマップ">
+                      <Icon name="map" size={14} />
+                      {robot.map_name}
+                    </span>
+                  )}
+                </div>
+              )}
+            </div>
           </button>
         );
       })}
