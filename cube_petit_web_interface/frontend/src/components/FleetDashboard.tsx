@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Icon } from './Icon';
-import { colorForRobot, nicknameForRobot } from './RobotPicker';
+import { ActiveStateIcon, colorForRobot, nicknameForRobot } from './RobotPicker';
 
 // 「フリート運用」タブ: 共有マップ上に全機体の現在地を重ねて表示し、
 // 1点への集合(move_to_pose一斉送信)・追いかけっこモード(chaserの目標をtargetの
@@ -16,6 +16,8 @@ interface FleetRobotState {
   pose: { x: number; y: number; yaw: number } | null;
   battery: number | null;
   map_name: string | null;
+  bringup_active: boolean | null;
+  nav_active: boolean | null;
   online: boolean;
   last_seen_sec_ago: number;
 }
@@ -650,6 +652,14 @@ export function FleetDashboard({ apiUrl }: Props) {
                 }}>
                   <div style={{ width: 9, height: 9, borderRadius: '50%', background: colorForRobot(name), flexShrink: 0 }} />
                   <span style={{ flex: 1, color: 'var(--t-text)' }}>{nicknameForRobot(name)}</span>
+                  <ActiveStateIcon
+                    name="power_settings_new" active={r.bringup_active}
+                    activeLabel="bringup: 起動中" inactiveLabel="bringup: 停止中"
+                  />
+                  <ActiveStateIcon
+                    name="near_me" active={r.nav_active}
+                    activeLabel="navigation: 起動中" inactiveLabel="navigation: 停止中"
+                  />
                   <span style={{ color: 'var(--t-text-dim)' }}>{r.map_name ?? '?'}</span>
                 </div>
               );

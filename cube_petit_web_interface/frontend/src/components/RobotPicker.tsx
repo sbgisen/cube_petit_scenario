@@ -14,6 +14,8 @@ interface FleetRobotState {
   pose: { x: number; y: number; yaw: number } | null;
   battery: number | null;
   map_name: string | null;
+  bringup_active: boolean | null;
+  nav_active: boolean | null;
   online: boolean;
   last_seen_sec_ago: number;
 }
@@ -63,6 +65,24 @@ function batteryIconName(pct: number): string {
   if (pct >= 20) return 'battery_3_bar';
   if (pct >= 10) return 'battery_2_bar';
   return 'battery_alert';
+}
+
+/**
+ * Small "bringup"/"navigation" status icon, shared by RobotPicker and
+ * FleetDashboard. Renders nothing when `active` is `null` (older
+ * zenoh_connector.py that doesn't publish this field yet, or no data
+ * received so far) -- true/false vs. "not yet known" are deliberately
+ * distinguished rather than treating null as false.
+ */
+export function ActiveStateIcon({ name, active, activeLabel, inactiveLabel }: {
+  name: string; active: boolean | null; activeLabel: string; inactiveLabel: string;
+}) {
+  if (active === null) return null;
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', opacity: active ? 1 : 0.35 }} title={active ? activeLabel : inactiveLabel}>
+      <Icon name={name} size={14} />
+    </span>
+  );
 }
 
 export function nicknameForRobot(namespace: string): string {
@@ -144,7 +164,7 @@ export function RobotPicker({ apiUrl, currentNamespace, onSelectRobot }: Props) 
             }} />
             <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
               <span>{nicknameForRobot(name)}</span>
-              {(batteryPct != null || robot.map_name) && (
+              {(batteryPct != null || robot.map_name || robot.bringup_active != null || robot.nav_active != null) && (
                 <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--t-text-dim)', fontSize: 12 }}>
                   {batteryPct != null && (
                     <span style={{ display: 'flex', alignItems: 'center', gap: 2 }} title="バッテリー残量">
@@ -158,6 +178,14 @@ export function RobotPicker({ apiUrl, currentNamespace, onSelectRobot }: Props) 
                       {robot.map_name}
                     </span>
                   )}
+                  <ActiveStateIcon
+                    name="power_settings_new" active={robot.bringup_active}
+                    activeLabel="bringup: 起動中" inactiveLabel="bringup: 停止中"
+                  />
+                  <ActiveStateIcon
+                    name="near_me" active={robot.nav_active}
+                    activeLabel="navigation: 起動中" inactiveLabel="navigation: 停止中"
+                  />
                 </div>
               )}
             </div>
