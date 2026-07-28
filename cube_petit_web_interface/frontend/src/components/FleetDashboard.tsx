@@ -461,6 +461,9 @@ export function FleetDashboard({ apiUrl }: Props) {
 
   const allRobotNames = Object.keys(fleet?.robots ?? {}).sort();
   const offMapRobots = Object.entries(fleet?.robots ?? {}).filter(([, r]) => r.map_name !== selectedMap);
+  // 追いかけっこは選択中マップにいるロボット同士でしか成立しない(別マップの機体を
+  // 目標にmove_to_poseしても座標系が合わず届かないため)
+  const robotNamesOnSelectedMap = onlineRobotsOnMap.map(([name]) => name).sort();
 
   return (
     <div style={{ display: 'flex', gap: 12, height: '100%', overflow: 'hidden' }}>
@@ -636,13 +639,16 @@ export function FleetDashboard({ apiUrl }: Props) {
             <label style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>追いかける側(chaser)</label>
             <select value={newChaser} onChange={e => setNewChaser(e.target.value)} style={selectStyle}>
               <option value="">選択してください</option>
-              {allRobotNames.map(n => <option key={n} value={n}>{nicknameForRobot(n)}</option>)}
+              {robotNamesOnSelectedMap.map(n => <option key={n} value={n}>{nicknameForRobot(n)}</option>)}
             </select>
             <label style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>追いかけられる側(target)</label>
             <select value={newTarget} onChange={e => setNewTarget(e.target.value)} style={selectStyle}>
               <option value="">選択してください</option>
-              {allRobotNames.filter(n => n !== newChaser).map(n => <option key={n} value={n}>{nicknameForRobot(n)}</option>)}
+              {robotNamesOnSelectedMap.filter(n => n !== newChaser).map(n => <option key={n} value={n}>{nicknameForRobot(n)}</option>)}
             </select>
+            {robotNamesOnSelectedMap.length === 0 && (
+              <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>このマップ上にオンラインの機体がいません</div>
+            )}
             <button onClick={addChasePair} disabled={!newChaser || !newTarget || newChaser === newTarget} style={{
               marginTop: 4, padding: '8px 0', borderRadius: 10, border: 'none',
               cursor: newChaser && newTarget && newChaser !== newTarget ? 'pointer' : 'not-allowed',
