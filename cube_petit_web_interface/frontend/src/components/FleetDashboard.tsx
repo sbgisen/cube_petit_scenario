@@ -35,6 +35,7 @@ const CHASE_PERIOD_MS = 3000;
 const ZOOM_MIN = 0.1;
 const ZOOM_MAX = 10;
 const ZOOM_BUTTON_FACTOR = 1.3;
+const ROTATE_STEP = Math.PI / 4; // 左右回転ボタン1クリック分(45度)
 
 export function FleetDashboard({ apiUrl }: Props) {
   const [maps, setMaps] = useState<string[]>([]);
@@ -48,6 +49,8 @@ export function FleetDashboard({ apiUrl }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
+  // マップ画像の中心を軸とした回転(ラジアン)。0=北上(回転なし)
+  const [rotation, setRotation] = useState(0);
   const panStart = useRef<{ mx: number; my: number; px: number; py: number } | null>(null);
 
   // ロック中はパン/ズーム/クリックでの目標地点指定を無効化(デモ中に画面が触られて
@@ -116,7 +119,10 @@ export function FleetDashboard({ apiUrl }: Props) {
     return () => { cancelled = true; clearInterval(t); };
   }, [apiUrl]);
 
-  // ---- 座標変換(回転なしの簡易版。単位: ピクセル<->world[m]) ----
+  // ---- 座標変換(単位: ピクセル<->world[m]) ----
+  // world<->px(マップ画像ピクセル座標)の変換自体は回転の影響を受けない。回転は
+  // 「マップ画像の中心を軸にした表示上の回転」として、px<->screen(canvas実ピクセル)の
+  // 変換(render()のctx.rotateとscreenToPx)側にのみ効かせる設計。
   const worldToPx = useCallback((wx: number, wy: number) => {
     if (!meta || !mapImg) return { px: 0, py: 0 };
     return {
@@ -133,13 +139,21 @@ export function FleetDashboard({ apiUrl }: Props) {
     };
   }, [meta, mapImg]);
 
+  // screen(canvas実ピクセル) -> px(マップ画像ピクセル、回転前の座標系)。
+  // render()での変換は translate(pan) -> scale(scale) -> [中心へtranslate -> rotate(rotation) ->
+  // 中心から戻すtranslate] -> drawImage(0,0) の順なので、逆変換は scale/pan を戻した後、
+  // 中心を軸に -rotation だけ回して戻す。
   const screenToPx = useCallback((clientX: number, clientY: number) => {
     const canvas = canvasRef.current!;
     const rect = canvas.getBoundingClientRect();
     const sx = clientX - rect.left, sy = clientY - rect.top;
     if (!mapImg) return { px: 0, py: 0 };
-    return { px: (sx - pan.x) / scale, py: (sy - pan.y) / scale };
-  }, [mapImg, pan, scale]);
+    const cx = mapImg.width / 2, cy = mapImg.height / 2;
+    const qx = (sx - pan.x) / scale - cx;
+    const qy = (sy - pan.y) / scale - cy;
+    const cos = Math.cos(-rotation), sin = Math.sin(-rotation);
+    return { px: qx * cos - qy * sin + cx, py: qx * sin + qy * cos + cy };
+  }, [mapImg, pan, scale, rotation]);
 
   // ---- 描画 ----
   const render = useCallback(() => {
@@ -150,6 +164,11 @@ export function FleetDashboard({ apiUrl }: Props) {
     ctx.save();
     ctx.translate(pan.x, pan.y);
     ctx.scale(scale, scale);
+    // マップ画像の中心を軸に回転(screenToPxの逆変換と対になる)
+    const rcx = mapImg.width / 2, rcy = mapImg.height / 2;
+    ctx.translate(rcx, rcy);
+    ctx.rotate(rotation);
+    ctx.translate(-rcx, -rcy);
     ctx.drawImage(mapImg, 0, 0);
 
     // 目標地点(集合先ドラフト)
@@ -188,7 +207,7 @@ export function FleetDashboard({ apiUrl }: Props) {
         ctx.strokeStyle = '#fff'; ctx.lineWidth = 2 / scale; ctx.stroke();
         ctx.beginPath(); ctx.moveTo(px, py);
         ctx.lineTo(px + Math.cos(imgYaw) * len, py + Math.sin(imgYaw) * len);
-        ctx.stroke();
+        ctx.strokeStyle = color; ctx.lineWidth = 3 / scale; ctx.stroke();
         ctx.font = `bold ${12 / scale}px sans-serif`;
         ctx.fillStyle = color;
         ctx.fillText(nicknameForRobot(name), px + r + 4 / scale, py - r);
@@ -196,7 +215,7 @@ export function FleetDashboard({ apiUrl }: Props) {
       }
     }
     ctx.restore();
-  }, [mapImg, scale, pan, fleet, targetPoint, draft, selectedMap, worldToPx]);
+  }, [mapImg, scale, pan, rotation, fleet, targetPoint, draft, selectedMap, worldToPx]);
 
   useEffect(() => {
     const canvas = canvasRef.current, cont = containerRef.current;
@@ -331,25 +350,39 @@ export function FleetDashboard({ apiUrl }: Props) {
     });
   };
 
-  // Google Maps風ズーム+/-(明示ボタン操作なのでロック中も有効)
+  // Google Maps風ズーム+/-(明示ボタン操作なのでロック中も有効)。
+  // 画面中心ではなく「現在表示中のマップ画像の中心」を基準にズームする(マップが画面の
+  // 隅に寄った状態で+/-を連打しても画面外へ逃げていかないように)。回転は画像の中心を軸に
+  // かけているので、この中心のスクリーン座標は回転の影響を受けず pan/scale だけで求まる
   const zoomBy = useCallback((factor: number) => {
-    const cont = containerRef.current;
-    if (!cont) return;
-    const cx = cont.clientWidth / 2, cy = cont.clientHeight / 2;
+    if (!mapImg) return;
     setScale(s => {
       const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * factor));
-      setPan(p => ({ x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) }));
+      setPan(p => {
+        const cx = p.x + (mapImg.width * s) / 2, cy = p.y + (mapImg.height * s) / 2;
+        return { x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) };
+      });
       return ns;
     });
-  }, []);
+  }, [mapImg]);
 
+  // マップの中心に画面を戻す(+ズーム・回転もリセットして全体表示)
   const fitToView = useCallback(() => {
     if (!mapImg || !containerRef.current) return;
     const c = containerRef.current;
     const s = Math.min(c.clientWidth / mapImg.width, c.clientHeight / mapImg.height, 1);
     setScale(s);
+    setRotation(0);
     setPan({ x: (c.clientWidth - mapImg.width * s) / 2, y: (c.clientHeight - mapImg.height * s) / 2 });
   }, [mapImg]);
+
+  const rotateBy = useCallback((delta: number) => {
+    setRotation(r => {
+      let nr = (r + delta) % (Math.PI * 2);
+      if (nr < 0) nr += Math.PI * 2;
+      return nr;
+    });
+  }, []);
 
   // ---- コマンド送信 ----
   const sendMoveToPose = async (robotName: string, x: number, y: number, yaw: number) => {
@@ -545,6 +578,19 @@ export function FleetDashboard({ apiUrl }: Props) {
                 title="ズームアウト"
                 style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
               ><Icon name="remove" size={22} /></button>
+            </div>
+            <div style={{ display: 'flex', borderRadius: 12, overflow: 'hidden', background: 'rgba(0,0,0,0.6)', border: '1px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+              <button
+                onClick={() => rotateBy(-ROTATE_STEP)}
+                title="左に45度回転"
+                style={{ width: 40, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="rotate_left" size={20} /></button>
+              <div style={{ width: 1, background: 'rgba(255,255,255,0.35)' }} />
+              <button
+                onClick={() => rotateBy(ROTATE_STEP)}
+                title="右に45度回転"
+                style={{ width: 40, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="rotate_right" size={20} /></button>
             </div>
           </div>
         )}
