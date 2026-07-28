@@ -315,7 +315,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         {/* 左: マップ */}
         <div ref={mapContainerRef} style={{ flex: 3, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
           {is3D
-            ? <MapView3D ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} />
+            ? <MapView3D ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} places={showPOI ? places : undefined} rooms={showPOI ? rooms : undefined} />
             : <MapView   ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} mode={mapMode} frame={mapFrame} onGoal={handleGoal} onInitialPose={handleInitialPose} places={showPOI ? places : undefined} rooms={showPOI ? rooms : undefined} />
           }
           {/* ナビゲーションステータスオーバーレイ */}

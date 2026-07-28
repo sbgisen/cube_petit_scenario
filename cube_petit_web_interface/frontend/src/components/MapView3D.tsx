@@ -4,6 +4,8 @@ import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
 import type { LayerVisibility } from '../types/ros';
+import type { MapPlace, MapRoomOverlay } from './MapView';
+import { colorForRobot } from './RobotPicker';
 
 interface LaserScan {
   angle_min: number;
@@ -26,12 +28,29 @@ interface PoseStamped {
   pose: { orientation: { x: number; y: number; z: number; w: number } };
 }
 
+interface OccupancyGrid {
+  info: {
+    resolution: number;
+    width: number;
+    height: number;
+    origin: { position: { x: number; y: number; z: number } };
+  };
+  data: number[];
+}
+
+const CAT_COLORS: Record<string, string> = {
+  dock: '#ff6600', favorite: '#ffcc00', patrol: '#00aaff', initial_pose: '#00ff88',
+};
+const ROOM_COLORS = ['#aa44ff', '#ff44aa', '#44aaff', '#ffaa44', '#44ffaa'];
+
 interface Props {
   ros: ROSLIB.Ros | null;
   namespace: string;
   layers: LayerVisibility;
   width: number;
   height: number;
+  places?: MapPlace[];
+  rooms?: MapRoomOverlay[];
 }
 
 function quatToYaw(z: number, w: number) {
@@ -43,7 +62,7 @@ function rosToThree(rx: number, ry: number): [number, number] {
   return [rx, -ry];
 }
 
-export function MapView3D({ ros, namespace, layers, width, height }: Props) {
+export function MapView3D({ ros, namespace, layers, width, height, places, rooms }: Props) {
   const containerRef = useRef<HTMLDivElement>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
@@ -52,6 +71,9 @@ export function MapView3D({ ros, namespace, layers, width, height }: Props) {
   const scanPointsRef = useRef<THREE.Points | null>(null);
   const peopleGroupRef = useRef<THREE.Group | null>(null);
   const doaArrowRef = useRef<THREE.ArrowHelper | null>(null);
+  const mapMeshRef = useRef<THREE.Mesh | null>(null);
+  const poiGroupRef = useRef<THREE.Group | null>(null);
+  const bodyMaterialsRef = useRef<THREE.MeshBasicMaterial[] | null>(null);
   const frameRef = useRef<number>(0);
 
   // 各購読にthrottle_rate/queue_length(ms/件)を指定してrosbridgeの負荷を抑える。
@@ -62,6 +84,8 @@ export function MapView3D({ ros, namespace, layers, width, height }: Props) {
     { queueLength: 1 });
   const doa = useRosTopic<PoseStamped>(ros, `/${namespace}/doa`, 'geometry_msgs/PoseStamped', layers.doa,
     { queueLength: 1 });
+  const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map,
+    { queueLength: 1 }); // latched・低頻度なのでthrottle不要
 
   // シーン初期化
   useEffect(() => {
@@ -100,14 +124,18 @@ export function MapView3D({ ros, namespace, layers, width, height }: Props) {
 
     // 本体ボックス: 各面に色を付けるため面ごとにマテリアルを設定
     // BoxGeometry面の順: +x(前), -x(後), +y(上), -y(下), +z(右), -z(左)
+    // 前面(白)は識別用の固定色。それ以外はロボット個体色(colorForRobot)からのバリエーション。
+    // namespace変更時はこの配列を直接書き換える(下の namespace 用useEffect参照)
+    const base = new THREE.Color(colorForRobot(namespace));
     const boxMaterials = [
       new THREE.MeshBasicMaterial({ color: 0xffffff }), // 前面(+x): 白
-      new THREE.MeshBasicMaterial({ color: 0xff6600 }), // 後面
-      new THREE.MeshBasicMaterial({ color: 0xff8833 }), // 上面
-      new THREE.MeshBasicMaterial({ color: 0xcc4400 }), // 下面
-      new THREE.MeshBasicMaterial({ color: 0xff6600 }), // 右面
-      new THREE.MeshBasicMaterial({ color: 0xff6600 }), // 左面
+      new THREE.MeshBasicMaterial({ color: base.clone() }), // 後面
+      new THREE.MeshBasicMaterial({ color: base.clone().offsetHSL(0, 0, 0.12) }), // 上面(明るめ)
+      new THREE.MeshBasicMaterial({ color: base.clone().offsetHSL(0, 0, -0.15) }), // 下面(暗め)
+      new THREE.MeshBasicMaterial({ color: base.clone() }), // 右面
+      new THREE.MeshBasicMaterial({ color: base.clone() }), // 左面
     ];
+    bodyMaterialsRef.current = boxMaterials;
     const body = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.22, 0.22), boxMaterials);
     body.position.y = 0.11;
     robotGroup.add(body);
@@ -141,6 +169,11 @@ export function MapView3D({ ros, namespace, layers, width, height }: Props) {
     const scanPoints = new THREE.Points(scanGeo, scanMat);
     scanPointsRef.current = scanPoints;
     scene.add(scanPoints);
+
+    // POI(places/rooms)グループ
+    const poiGroup = new THREE.Group();
+    poiGroupRef.current = poiGroup;
+    scene.add(poiGroup);
 
     const animate = () => {
       frameRef.current = requestAnimationFrame(animate);
@@ -235,6 +268,113 @@ export function MapView3D({ ros, namespace, layers, width, height }: Props) {
     doaArrowRef.current = arrow;
     scene.add(arrow);
   }, [doa, layers.doa]);
+
+  // マップ画像(occupancy grid)更新: セルデータからcanvasテクスチャを作り、床面に平面メッシュとして貼る
+  useEffect(() => {
+    const scene = sceneRef.current;
+    if (!scene) return;
+    if (mapMeshRef.current) {
+      scene.remove(mapMeshRef.current);
+      mapMeshRef.current.geometry.dispose();
+      const mat = mapMeshRef.current.material as THREE.MeshBasicMaterial;
+      mat.map?.dispose();
+      mat.dispose();
+      mapMeshRef.current = null;
+    }
+    if (!mapGrid || !layers.map) return;
+
+    const { resolution: res, width: mw, height: mh, origin } = mapGrid.info;
+    if (mw === 0 || mh === 0) return;
+
+    const offscreen = document.createElement('canvas');
+    offscreen.width = mw;
+    offscreen.height = mh;
+    const ctx2 = offscreen.getContext('2d');
+    if (!ctx2) return;
+    const imageData = ctx2.createImageData(mw, mh);
+    for (let i = 0; i < mapGrid.data.length; i++) {
+      const val = mapGrid.data[i];
+      const row = Math.floor(i / mw);
+      const col = i % mw;
+      const flippedRow = mh - 1 - row;
+      const idx = (flippedRow * mw + col) * 4;
+      if (val === -1) {
+        imageData.data[idx] = 100; imageData.data[idx+1] = 105; imageData.data[idx+2] = 115; imageData.data[idx+3] = 160;
+      } else if (val === 0) {
+        imageData.data[idx] = 195; imageData.data[idx+1] = 205; imageData.data[idx+2] = 215; imageData.data[idx+3] = 200;
+      } else {
+        imageData.data[idx] = 25; imageData.data[idx+1] = 30; imageData.data[idx+2] = 45; imageData.data[idx+3] = 235;
+      }
+    }
+    ctx2.putImageData(imageData, 0, 0);
+
+    const texture = new THREE.CanvasTexture(offscreen);
+    texture.needsUpdate = true;
+
+    const planeWidth = mw * res;
+    const planeHeight = mh * res;
+    const geometry = new THREE.PlaneGeometry(planeWidth, planeHeight);
+    const material = new THREE.MeshBasicMaterial({ map: texture, transparent: true, depthWrite: false });
+    const mesh = new THREE.Mesh(geometry, material);
+    mesh.rotation.x = -Math.PI / 2;
+
+    // origin.position はマップ左下(ROS座標)。平面中心はそこからセル解像度×幅/高さの半分だけ+方向にずれる
+    const centerRx = origin.position.x + planeWidth / 2;
+    const centerRy = origin.position.y + planeHeight / 2;
+    const [tx, tz] = rosToThree(centerRx, centerRy);
+    mesh.position.set(tx, -0.01, tz);
+
+    scene.add(mesh);
+    mapMeshRef.current = mesh;
+  }, [mapGrid, layers.map]);
+
+  // POI(places/rooms)更新
+  useEffect(() => {
+    const group = poiGroupRef.current;
+    if (!group) return;
+    group.clear();
+
+    if (places) {
+      places.forEach((place) => {
+        const color = new THREE.Color(CAT_COLORS[place.category] || '#ffffff');
+        const marker = new THREE.Mesh(
+          new THREE.SphereGeometry(0.05, 12, 8),
+          new THREE.MeshBasicMaterial({ color })
+        );
+        const [tx, tz] = rosToThree(place.x, place.y);
+        marker.position.set(tx, 0.1, tz);
+        group.add(marker);
+      });
+    }
+
+    if (rooms) {
+      rooms.forEach((room, idx) => {
+        if (!room.points || room.points.length < 3) return;
+        const color = new THREE.Color(ROOM_COLORS[idx % ROOM_COLORS.length]);
+        const points = room.points.map(([rx, ry]) => {
+          const [tx, tz] = rosToThree(rx, ry);
+          return new THREE.Vector3(tx, 0.02, tz);
+        });
+        points.push(points[0].clone()); // 輪郭を閉じる
+        const geometry = new THREE.BufferGeometry().setFromPoints(points);
+        const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color }));
+        group.add(line);
+      });
+    }
+  }, [places, rooms]);
+
+  // ロボット個体色更新: namespace(ロボット切り替え)に追従。シーン全体は再構築せずマテリアルのみ書き換える
+  useEffect(() => {
+    const mats = bodyMaterialsRef.current;
+    if (!mats) return;
+    const base = new THREE.Color(colorForRobot(namespace));
+    // mats[0](前面)は識別用の白固定なのでそのまま
+    mats[1].color.copy(base);                                  // 後面
+    mats[2].color.copy(base).offsetHSL(0, 0, 0.12);             // 上面(明るめ)
+    mats[3].color.copy(base).offsetHSL(0, 0, -0.15);            // 下面(暗め)
+    mats[4].color.copy(base);                                  // 右面
+    mats[5].color.copy(base);                                  // 左面
+  }, [namespace]);
 
   const handleReset = () => {
     const camera = cameraRef.current;
