@@ -266,6 +266,32 @@ def send_fleet_command(robot_name: str, method: str, args: dict) -> str:
     return _fleet_watcher.send_command(robot_name, method, args)
 
 
+def start_fleet_chase(chaser: str, target: str) -> str:
+    """追いかけっこペアを開始する(このAPIサーバープロセス内の常駐ループで実行される).
+
+    Raises:
+        RuntimeError: フリート監視(zenoh)が起動していない場合。
+        ValueError: chaser == target の場合。
+    """
+    if _fleet_watcher is None:
+        raise RuntimeError('Fleet zenoh watcher is not running (Tier 2 unavailable)')
+    return _fleet_watcher.start_chase(chaser, target)
+
+
+def stop_fleet_chase(pair_id: str) -> bool:
+    """追いかけっこペアを停止する。存在しなければFalse."""
+    if _fleet_watcher is None:
+        return False
+    return _fleet_watcher.stop_chase(pair_id)
+
+
+def list_fleet_chase() -> list:
+    """現在アクティブな追いかけっこペア一覧を返す."""
+    if _fleet_watcher is None:
+        return []
+    return _fleet_watcher.list_chase()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_ros_thread()

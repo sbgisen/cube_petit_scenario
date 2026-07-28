@@ -48,6 +48,17 @@ class FleetCommandResponse(BaseModel):
     error: str = ''
 
 
+class ChaseStartRequest(BaseModel):
+    chaser: str
+    target: str
+
+
+class ChaseStartResponse(BaseModel):
+    ok: bool
+    id: str = ''
+    error: str = ''
+
+
 @router.get('/fleet/robots')
 async def get_fleet_robots() -> dict:
     """Zenoh フリートネットワーク上で見えている全ロボットの最新状態を返す.
@@ -77,3 +88,29 @@ async def post_fleet_command(req: FleetCommandRequest) -> FleetCommandResponse:
     except RuntimeError as error:
         return FleetCommandResponse(ok=False, error=str(error))
     return FleetCommandResponse(ok=True, command_id=command_id)
+
+
+@router.post('/fleet/chase/start', response_model=ChaseStartResponse)
+async def start_chase(req: ChaseStartRequest) -> ChaseStartResponse:
+    """追いかけっこペアを開始する.
+
+    このAPIサーバー常駐プロセス内のループで実行され、ダッシュボードの
+    タブ切替/クローズに影響されない。
+    """
+    try:
+        pair_id = core.start_fleet_chase(req.chaser, req.target)
+    except (RuntimeError, ValueError) as error:
+        return ChaseStartResponse(ok=False, error=str(error))
+    return ChaseStartResponse(ok=True, id=pair_id)
+
+
+@router.post('/fleet/chase/stop')
+async def stop_chase(pair_id: str) -> dict:
+    """追いかけっこペアを停止する."""
+    return {'ok': core.stop_fleet_chase(pair_id)}
+
+
+@router.get('/fleet/chase/list')
+async def list_chase() -> dict:
+    """現在アクティブな追いかけっこペア一覧を返す."""
+    return {'pairs': core.list_fleet_chase()}
