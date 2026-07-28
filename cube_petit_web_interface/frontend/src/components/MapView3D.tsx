@@ -1,8 +1,10 @@
 import { useEffect, useRef } from 'react';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/examples/jsm/controls/OrbitControls.js';
+import { CSS2DRenderer, CSS2DObject } from 'three/examples/jsm/renderers/CSS2DRenderer.js';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
+import { useRosTf } from '../hooks/useRosTf';
 import type { LayerVisibility } from '../types/ros';
 import type { MapPlace, MapRoomOverlay } from './MapView';
 import { colorForRobot } from './RobotPicker';
@@ -74,6 +76,8 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
   const mapMeshRef = useRef<THREE.Mesh | null>(null);
   const poiGroupRef = useRef<THREE.Group | null>(null);
   const bodyMaterialsRef = useRef<THREE.MeshBasicMaterial[] | null>(null);
+  const robotGroupRef = useRef<THREE.Group | null>(null);
+  const labelRendererRef = useRef<CSS2DRenderer | null>(null);
   const frameRef = useRef<number>(0);
 
   // 各購読にthrottle_rate/queue_length(ms/件)を指定してrosbridgeの負荷を抑える。
@@ -86,6 +90,9 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     { queueLength: 1 });
   const mapGrid = useRosTopic<OccupancyGrid>(ros, `/${namespace}/navigation/map`, 'nav_msgs/OccupancyGrid', layers.map,
     { queueLength: 1 }); // latched・低頻度なのでthrottle不要
+  // ロボット自己位置(mapフレーム内でのbase_link)。useRosTfはTFツリーをBFS探索するので
+  // map→odom→base_linkの中間フレームを意識せず直接map→base_linkを購読できる
+  const robotTf = useRosTf(ros, 'map', `${namespace}/base_link`, true);
 
   // シーン初期化
   useEffect(() => {
@@ -113,6 +120,16 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     controls.maxPolarAngle = Math.PI / 2;
     controlsRef.current = controls;
 
+    // POI名前ラベル用: DOM要素をシーン内オブジェクトの画面投影位置に重ねるレンダラー
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(width, height);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0';
+    labelRenderer.domElement.style.left = '0';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    container.appendChild(labelRenderer.domElement);
+    labelRendererRef.current = labelRenderer;
+
     // グリッド (1m間隔, 20m範囲)
     const grid = new THREE.GridHelper(20, 20, 0x333366, 0x222244);
     scene.add(grid);
@@ -120,7 +137,10 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     scene.add(gridMain);
 
     // ロボット本体 (22cm四方のキューブ)
+    // mapフレームでの自己位置(robotTf)に応じてposition/rotation.yを更新する(下のuseEffect参照)。
+    // LiDAR点群・人マーカー・DOA矢印はbase_link相対の量なのでこのグループの子として追従させる
     const robotGroup = new THREE.Group();
+    robotGroupRef.current = robotGroup;
 
     // 本体ボックス: 各面に色を付けるため面ごとにマテリアルを設定
     // BoxGeometry面の順: +x(前), -x(後), +y(上), -y(下), +z(右), -z(左)
@@ -140,7 +160,8 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     body.position.y = 0.11;
     robotGroup.add(body);
 
-    // 前方ノーズ: 前方(+x)に突き出た三角錐
+    // 前方ノーズ: 前方(+x)に突き出た三角錐。ロボットの向きはこれ単体で示す
+    // (以前はArrowHelperも併用していたが、ノーズと向きの表現が重複するため撤去)
     const noseMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
     const nose = new THREE.Mesh(new THREE.ConeGeometry(0.07, 0.18, 4), noseMat);
     nose.rotation.z = -Math.PI / 2; // x軸方向に向ける
@@ -148,27 +169,19 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     nose.position.set(0.19, 0.11, 0);
     robotGroup.add(nose);
 
-    // 上部の前方方向ライン (地面からでも見えるよう高めに)
-    const fwdArrow = new THREE.ArrowHelper(
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(0, 0.26, 0),
-      0.55, 0xffffff, 0.18, 0.12
-    );
-    robotGroup.add(fwdArrow);
-
     scene.add(robotGroup);
 
-    // 人グループ
+    // 人グループ (base_link相対のためロボットグループの子にして追従させる)
     const peopleGroup = new THREE.Group();
     peopleGroupRef.current = peopleGroup;
-    scene.add(peopleGroup);
+    robotGroup.add(peopleGroup);
 
-    // LiDAR点群
+    // LiDAR点群 (base_link相対のためロボットグループの子にして追従させる)
     const scanGeo = new THREE.BufferGeometry();
     const scanMat = new THREE.PointsMaterial({ color: 0x00ff88, size: 0.06 });
     const scanPoints = new THREE.Points(scanGeo, scanMat);
     scanPointsRef.current = scanPoints;
-    scene.add(scanPoints);
+    robotGroup.add(scanPoints);
 
     // POI(places/rooms)グループ
     const poiGroup = new THREE.Group();
@@ -179,6 +192,7 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
       frameRef.current = requestAnimationFrame(animate);
       controls.update();
       renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
     };
     animate();
 
@@ -189,6 +203,9 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
       }
+      if (container.contains(labelRenderer.domElement)) {
+        container.removeChild(labelRenderer.domElement);
+      }
     };
   }, []);
 
@@ -196,10 +213,12 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
   useEffect(() => {
     const renderer = rendererRef.current;
     const camera = cameraRef.current;
+    const labelRenderer = labelRendererRef.current;
     if (!renderer || !camera) return;
     renderer.setSize(width, height);
     camera.aspect = width / height;
     camera.updateProjectionMatrix();
+    labelRenderer?.setSize(width, height);
   }, [width, height]);
 
   // LiDAR点群更新
@@ -252,12 +271,12 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     });
   }, [markers, layers.people]);
 
-  // DOA矢印更新
+  // DOA矢印更新 (base_link相対の量なのでロボットグループの子として追従させる)
   useEffect(() => {
-    const scene = sceneRef.current;
-    if (!scene) return;
+    const group = robotGroupRef.current;
+    if (!group) return;
     if (doaArrowRef.current) {
-      scene.remove(doaArrowRef.current);
+      group.remove(doaArrowRef.current);
       doaArrowRef.current = null;
     }
     if (!doa || !layers.doa) return;
@@ -266,8 +285,19 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     const dir = new THREE.Vector3(dx, 0, dz).normalize();
     const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0.15, 0), 1, 0xffcc00, 0.2, 0.15);
     doaArrowRef.current = arrow;
-    scene.add(arrow);
+    group.add(arrow);
   }, [doa, layers.doa]);
+
+  // ロボット自己位置更新: mapフレームでのTF(robotTf)をrobotGroupのposition/rotationに反映する。
+  // TF未取得の間は現在の表示位置を維持し、無理に原点へ戻したりしない
+  useEffect(() => {
+    const group = robotGroupRef.current;
+    if (!group || !robotTf) return;
+    const [tx, tz] = rosToThree(robotTf.translation.x, robotTf.translation.y);
+    const yaw = quatToYaw(robotTf.rotation.z, robotTf.rotation.w);
+    group.position.set(tx, 0, tz);
+    group.rotation.y = yaw;
+  }, [robotTf]);
 
   // マップ画像(occupancy grid)更新: セルデータからcanvasテクスチャを作り、床面に平面メッシュとして貼る
   useEffect(() => {
@@ -334,31 +364,55 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     if (!group) return;
     group.clear();
 
+    // ラベル用div共通スタイル(CSS2DObjectはNW3Dのシーングラフに乗るdiv要素として名前を出す)
+    const makeLabelDiv = (text: string, color: string) => {
+      const div = document.createElement('div');
+      div.textContent = text;
+      div.style.color = color;
+      div.style.fontSize = '11px';
+      div.style.fontFamily = 'sans-serif';
+      div.style.textShadow = '0 0 3px rgba(0,0,0,0.9), 0 0 3px rgba(0,0,0,0.9)';
+      div.style.whiteSpace = 'nowrap';
+      return div;
+    };
+
     if (places) {
       places.forEach((place) => {
-        const color = new THREE.Color(CAT_COLORS[place.category] || '#ffffff');
+        const colorHex = CAT_COLORS[place.category] || '#ffffff';
         const marker = new THREE.Mesh(
           new THREE.SphereGeometry(0.05, 12, 8),
-          new THREE.MeshBasicMaterial({ color })
+          new THREE.MeshBasicMaterial({ color: new THREE.Color(colorHex) })
         );
         const [tx, tz] = rosToThree(place.x, place.y);
         marker.position.set(tx, 0.1, tz);
         group.add(marker);
+
+        // 名前ラベル: マーカーの少し右にオフセットして表示(CSS2DObjectはdivをそのまま画面投影位置に重ねる)
+        const label = new CSS2DObject(makeLabelDiv(place.name, colorHex));
+        label.center.set(0, 0.5);
+        label.element.style.marginLeft = '8px';
+        label.position.set(tx, 0.1, tz);
+        group.add(label);
       });
     }
 
     if (rooms) {
       rooms.forEach((room, idx) => {
         if (!room.points || room.points.length < 3) return;
-        const color = new THREE.Color(ROOM_COLORS[idx % ROOM_COLORS.length]);
+        const colorHex = ROOM_COLORS[idx % ROOM_COLORS.length];
         const points = room.points.map(([rx, ry]) => {
           const [tx, tz] = rosToThree(rx, ry);
           return new THREE.Vector3(tx, 0.02, tz);
         });
         points.push(points[0].clone()); // 輪郭を閉じる
         const geometry = new THREE.BufferGeometry().setFromPoints(points);
-        const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color }));
+        const line = new THREE.Line(geometry, new THREE.LineBasicMaterial({ color: new THREE.Color(colorHex) }));
         group.add(line);
+
+        const label = new CSS2DObject(makeLabelDiv(room.name, colorHex));
+        label.center.set(0, 0.5);
+        label.position.copy(points[0]);
+        group.add(label);
       });
     }
   }, [places, rooms]);
@@ -380,10 +434,15 @@ export function MapView3D({ ros, namespace, layers, width, height, places, rooms
     const camera = cameraRef.current;
     const controls = controlsRef.current;
     if (!camera || !controls) return;
-    camera.position.set(0, 6, 6);
-    camera.lookAt(0, 0, 0);
-    controls.target.set(0, 0, 0);
-    controls.reset();
+    // mapフレームでロボットが原点から離れている場合があるため、robotGroupの現在位置を中心に戻す
+    // (単純なcontrols.reset()は構築時の(0,6,6)/原点に戻ってしまいロボットを見失うため使わない)
+    const group = robotGroupRef.current;
+    const cx = group?.position.x ?? 0;
+    const cz = group?.position.z ?? 0;
+    camera.position.set(cx, 6, cz + 6);
+    camera.lookAt(cx, 0, cz);
+    controls.target.set(cx, 0, cz);
+    controls.update();
   };
 
   return (
