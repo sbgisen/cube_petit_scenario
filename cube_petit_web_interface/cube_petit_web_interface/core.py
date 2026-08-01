@@ -35,10 +35,14 @@ if TYPE_CHECKING:
 
 try:
     # uvicorn cube_petit_web_interface.api_server:app で起動した場合
+    from cube_petit_web_interface import conversation_conductor
+    from cube_petit_web_interface import conversation_conductor_logic
     from cube_petit_web_interface import fleet_zenoh
     from cube_petit_web_interface import helpers
 except ImportError:
     # python api_server.py で直接実行した場合
+    import conversation_conductor  # noqa: F401  (routers から core.conversation_conductor として参照される)
+    import conversation_conductor_logic  # noqa: F401  (会話デモ未起動時のstatusペイロード組み立てに使う)
     import fleet_zenoh  # noqa: F401  (routers から core.fleet_zenoh として参照される)
     import helpers  # noqa: F401  (routers から core.helpers として参照される)
 
@@ -301,6 +305,49 @@ def list_fleet_chase() -> list:
     return _fleet_watcher.list_chase()
 
 
+# ================= 会話デモ「指揮者」(conversation_conductor.py) =================
+# fleet zenoh watcher(_fleet_watcher)の send_command/wait_for_completion を
+# そのまま指揮者に渡す(zenohセッションを二重に開かない)。フリート監視スレッド
+# 起動前にstartが呼ばれた場合はエラーにする(chase系のRuntimeErrorパターンと同じ)。
+_conversation_conductor: Optional['conversation_conductor.ConversationConductor'] = None
+
+
+def _get_conversation_conductor() -> 'conversation_conductor.ConversationConductor':
+    global _conversation_conductor
+    if _conversation_conductor is None:
+        if _fleet_watcher is None:
+            raise RuntimeError('Fleet zenoh watcher is not running (Tier 2 unavailable); '
+                               'the conversation demo needs it to send speak commands')
+        _conversation_conductor = conversation_conductor.ConversationConductor(
+            send_command=_fleet_watcher.send_command,
+            wait_for_completion=_fleet_watcher.wait_for_completion,
+        )
+    return _conversation_conductor
+
+
+def start_fleet_conversation(participants: list, mode: str = 'script') -> None:
+    """会話デモ(指揮者)を開始する.
+
+    Raises:
+        RuntimeError: フリート監視(zenoh)が起動していない場合。
+        conversation_conductor.ConductorError: 既に実行中/参加機体不足/未対応モード。
+    """
+    _get_conversation_conductor().start(participants, mode)
+
+
+def stop_fleet_conversation() -> None:
+    """会話デモ(指揮者)を停止する(実行中でなければ何もしない)."""
+    if _conversation_conductor is not None:
+        _conversation_conductor.stop()
+
+
+def get_fleet_conversation_status() -> dict:
+    """会話デモ(指揮者)の現在状態を返す(未起動なら停止中として扱う)."""
+    if _conversation_conductor is None:
+        return conversation_conductor_logic.build_status_payload({})
+    return _conversation_conductor.status()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     start_ros_thread()
@@ -309,6 +356,8 @@ async def lifespan(app: FastAPI) -> AsyncIterator[None]:
     for proc in processes.values():
         if proc and proc.poll() is None:
             proc.terminate()
+    if _conversation_conductor is not None:
+        _conversation_conductor.stop()
     if _fleet_watcher is not None:
         _fleet_watcher.close()
 

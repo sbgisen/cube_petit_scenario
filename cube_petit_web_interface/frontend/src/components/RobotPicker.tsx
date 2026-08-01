@@ -39,6 +39,7 @@ export const ROBOT_COLOR: Record<string, string> = {
   pink: '#ff4da6',
   yellow: '#e6c200',
   purple: '#8855dd',
+  violet: '#A78BFA', // setup_cube_petit/webapp/fleet.yaml と同じ値(ROSConJP 2026デモ機体)
   green: '#2ecc71',
   blue: '#3498db',
 };
@@ -48,6 +49,7 @@ export const ROBOT_NICKNAME: Record<string, string> = {
   pink: 'ピンクプチ',
   yellow: 'イエロープチ',
   purple: 'パープルプチ',
+  violet: 'バイオレットプチ',
   green: 'グリーンプチ',
   blue: 'ブループチ',
 };

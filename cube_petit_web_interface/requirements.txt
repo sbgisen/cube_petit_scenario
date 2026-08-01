@@ -12,3 +12,10 @@ eclipse-zenoh>=1.0.0
 # 機体間マップ共有(/map/share)でのHTTP転送に使用。requestsは既にFastAPI関連の
 # 依存で入っていることが多いが、pip解決の都合上明示しておく。
 requests>=2.31.0
+
+# 会話デモ「指揮者」(conversation_conductor.py)のLLM呼び出しに使用。
+# cube_petit_interaction/cube_petit_chat が使っているのと同じ OpenAI Python SDK
+# (client.responses.create、OPENAI_API_KEY環境変数)。rosdepでは解決できないため
+# uvで入れる(このマシンでは素のpipが失敗する。他リポジトリの.venv運用を参照):
+#   uv pip install --system openai
+openai>=1.0.0

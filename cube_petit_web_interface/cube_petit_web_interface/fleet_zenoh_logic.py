@@ -69,6 +69,39 @@ def parse_robot_name(key_expr: str, field: str) -> typing.Optional[str]:
     return None
 
 
+def parse_completion_payload(payload: typing.Union[bytes, bytearray, str]) -> typing.Tuple[typing.Optional[str], bool]:
+    """Decode a ``robots/<robot_name>/command_is_completed`` payload.
+
+    Wire format is fixed by cube_petit_fleet_bridge's
+    ``fleet_bridge_logic.encode_completion``: ``{"id", "is_completed",
+    "success"}`` JSON (see that module's docstring in the cube_petit_ros
+    repo). Used by the conversation conductor (conversation_conductor.py) to
+    know when a `speak` command finished, so it can move on to the next
+    turn instead of always falling back to the estimated-duration timeout.
+
+    Args:
+        payload: Raw zenoh payload, as ``bytes``/``bytearray`` or ``str``.
+
+    Returns:
+        ``(command_id, success)``. `command_id` is `None` if the payload is
+        not valid JSON, not an object, or has no non-empty string `id` --
+        callers should ignore the sample in that case rather than raise
+        (mirrors decode_field()'s degrade-gracefully-on-foreign-traffic
+        stance for this best-effort watcher).
+    """
+    text = payload.decode('utf-8') if isinstance(payload, (bytes, bytearray)) else payload
+    try:
+        data = json.loads(text)
+    except (ValueError, TypeError):
+        return None, False
+    if not isinstance(data, dict):
+        return None, False
+    command_id = data.get('id')
+    if not isinstance(command_id, str) or not command_id:
+        return None, False
+    return command_id, bool(data.get('success'))
+
+
 def decode_field(payload: typing.Union[bytes, bytearray, str]) -> typing.Union[dict, float, str, bool]:
     """Decode a per-field zenoh payload (all JSON, one value per `FIELDS` entry).
 

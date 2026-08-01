@@ -109,6 +109,19 @@ class FleetZenohWatcher:
         self._chase_stop = threading.Event()
         self._chase_thread: typing.Optional[threading.Thread] = None
 
+        # ================= command completion tracking (conversation conductor) =================
+        # 会話デモ(conversation_conductor.py)がspeakコマンドの完了を待つための購読。
+        # Tier 2のsnapshot()には出てこない(FIELDSはpose/battery/map_name/...のみ)、
+        # 完了待ちのcaller専用の別系統。
+        # Completion tracking for the conversation conductor's speak commands. Kept separate
+        # from FIELDS/snapshot() -- fleet_zenoh_logic.FIELDS deliberately excludes
+        # command_is_completed (out of scope for the read-only picker), this is purely for
+        # callers that explicitly wait_for_completion() on a command_id they issued.
+        self._completion_lock = threading.Lock()
+        self._completion_events: typing.Dict[str, threading.Event] = {}
+        self._completion_results: typing.Dict[str, bool] = {}
+        self._completion_sub = None
+
     def start(self) -> None:
         """Open the zenoh session and declare one subscriber per field in `logic.FIELDS`.
 
@@ -124,6 +137,7 @@ class FleetZenohWatcher:
             key = f'robots/*/{field}'
             sub = self._session.declare_subscriber(key, functools.partial(self._on_sample, field))
             self._subs.append(sub)
+        self._completion_sub = self._session.declare_subscriber('robots/*/command_is_completed', self._on_completion)
         self._chase_stop.clear()
         self._chase_thread = threading.Thread(target=self._chase_loop, daemon=True)
         self._chase_thread.start()
@@ -146,6 +160,47 @@ class FleetZenohWatcher:
             robot = self._state.setdefault(robot_name, {})
             robot[field] = value
             robot['last_seen'] = time.monotonic()
+
+    def _on_completion(self, sample: 'zenoh.Sample') -> None:
+        command_id, success = logic.parse_completion_payload(sample.payload.to_bytes())
+        if command_id is None:
+            return
+        with self._completion_lock:
+            self._completion_results[command_id] = success
+            event = self._completion_events.get(command_id)
+        if event is not None:
+            event.set()
+
+    def wait_for_completion(self, command_id: str, timeout: float) -> typing.Optional[bool]:
+        """Block until `command_id`'s ``command_is_completed`` notice arrives, or `timeout` elapses.
+
+        Used by the conversation conductor after a ``speak`` command, so it
+        can advance to the next turn as soon as the robot is actually done
+        talking instead of always sleeping the full estimated duration.
+
+        Args:
+            command_id: The id returned by send_command().
+            timeout: Max seconds to wait (callers should pass an
+                estimated-duration-derived ceiling, e.g.
+                conversation_conductor_logic.completion_timeout_sec()).
+
+        Returns:
+            The command's `success` flag, or `None` if it timed out (caller
+            should treat this as "probably done speaking, move on" rather
+            than an error -- the notice may simply have been dropped).
+        """
+        with self._completion_lock:
+            if command_id in self._completion_results:
+                return self._completion_results.pop(command_id)
+            event = threading.Event()
+            self._completion_events[command_id] = event
+        fired = event.wait(timeout)
+        with self._completion_lock:
+            self._completion_events.pop(command_id, None)
+            if fired:
+                return self._completion_results.pop(command_id, None)
+            self._completion_results.pop(command_id, None)
+            return None
 
     def snapshot(self, stale_after: float = logic.STALE_AFTER_SEC) -> typing.Dict[str, dict]:
         """Return a JSON-serializable ``{robot_name: {pose, battery, map_name, online, ...}}`` snapshot."""

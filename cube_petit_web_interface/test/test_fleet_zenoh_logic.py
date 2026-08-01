@@ -64,6 +64,35 @@ class TestDecodeField:
             logic.decode_field('not json')
 
 
+class TestParseCompletionPayload:
+
+    def test_decodes_valid_payload(self) -> None:
+        payload = json.dumps({'id': 'abc123', 'is_completed': True, 'success': True})
+        assert logic.parse_completion_payload(payload) == ('abc123', True)
+
+    def test_decodes_bytes(self) -> None:
+        payload = json.dumps({'id': 'abc123', 'is_completed': True, 'success': False}).encode('utf-8')
+        assert logic.parse_completion_payload(payload) == ('abc123', False)
+
+    def test_missing_id_returns_none_command_id(self) -> None:
+        payload = json.dumps({'is_completed': True, 'success': True})
+        command_id, _ = logic.parse_completion_payload(payload)
+        assert command_id is None
+
+    def test_invalid_json_returns_none_command_id(self) -> None:
+        command_id, success = logic.parse_completion_payload('not json')
+        assert command_id is None
+        assert success is False
+
+    def test_non_object_returns_none_command_id(self) -> None:
+        command_id, _ = logic.parse_completion_payload(json.dumps([1, 2, 3]))
+        assert command_id is None
+
+    def test_missing_success_defaults_to_false(self) -> None:
+        payload = json.dumps({'id': 'xyz', 'is_completed': True})
+        assert logic.parse_completion_payload(payload) == ('xyz', False)
+
+
 class TestBuildSnapshot:
 
     def test_reports_online_within_stale_window(self) -> None:

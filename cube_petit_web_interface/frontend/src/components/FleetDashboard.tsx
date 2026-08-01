@@ -28,6 +28,28 @@ interface FleetResponse {
   robots: Record<string, FleetRobotState>;
 }
 
+// 会話デモ(指揮者方式・台本モード): ROSConJP 2026ブース。バックエンドは
+// cube_petit_web_interface/conversation_conductor.py + routers/conversation_router.py。
+// speakerはロボットのshort name(例: 'orange'、'cube_petit_'プレフィックスなし)。
+interface ConversationLogEntry {
+  speaker: string;
+  text: string;
+  face: string;
+  success: boolean | null;
+  error: string;
+}
+
+interface ConversationStatus {
+  running: boolean;
+  mode: string;
+  participants: string[];
+  current_turn: number;
+  total_turns: number;
+  log: ConversationLogEntry[];
+  elapsed_sec: number;
+  error: string;
+}
+
 interface Props {
   apiUrl: string;
 }
@@ -78,6 +100,10 @@ export function FleetDashboard({ apiUrl }: Props) {
   const [chasePairs, setChasePairs] = useState<{ id: string; chaser: string; target: string }[]>([]);
   const [newChaser, setNewChaser] = useState('');
   const [newTarget, setNewTarget] = useState('');
+
+  // ---- 会話デモ(台本モード) ----
+  const [convoStatus, setConvoStatus] = useState<ConversationStatus | null>(null);
+  const [convoParticipants, setConvoParticipants] = useState<string[]>([]);
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
@@ -491,6 +517,37 @@ export function FleetDashboard({ apiUrl }: Props) {
     if (!res.ok) showMsg('ペアの停止に失敗しました');
   };
 
+  // ---- 会話デモ(指揮者・台本モード): サーバー側の常駐スレッドで実行され、
+  // ブラウザ側はGET /fleet/conversation/statusをポーリングして表示するだけ
+  // (追いかけっこモードと同じ、タブ切替/クローズに影響されない設計) ----
+  useEffect(() => {
+    let cancelled = false;
+    const poll = () =>
+      fetch(`${apiUrl}/fleet/conversation/status`).then(r => r.json())
+        .then(d => { if (!cancelled) setConvoStatus(d); }).catch(() => { if (!cancelled) setConvoStatus(null); });
+    poll();
+    const t = setInterval(poll, POLL_MS);
+    return () => { cancelled = true; clearInterval(t); };
+  }, [apiUrl]);
+
+  const toggleConvoParticipant = (name: string) => {
+    setConvoParticipants(prev => prev.includes(name) ? prev.filter(n => n !== name) : [...prev, name]);
+  };
+
+  const startConversation = async () => {
+    const res = await fetch(`${apiUrl}/fleet/conversation/start`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ participants: convoParticipants, mode: 'script' }),
+    }).then(r => r.json()).catch(() => ({ ok: false, error: '通信エラー' }));
+    if (!res.ok) showMsg(`会話デモの開始に失敗: ${res.error ?? ''}`);
+  };
+
+  const stopConversation = async () => {
+    const res = await fetch(`${apiUrl}/fleet/conversation/stop`, { method: 'POST' })
+      .then(r => r.json()).catch(() => ({ ok: false }));
+    if (!res.ok) showMsg('会話デモの停止に失敗しました');
+  };
+
   const allRobotNames = Object.keys(fleet?.robots ?? {}).sort();
   const offMapRobots = Object.entries(fleet?.robots ?? {}).filter(([, r]) => r.map_name !== selectedMap);
   // 追いかけっこは選択中マップにいるロボット同士でしか成立しない(別マップの機体を
@@ -723,6 +780,77 @@ export function FleetDashboard({ apiUrl }: Props) {
                 <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>
                   {CHASE_PERIOD_MS / 1000}秒ごとに現在地へ追従送信中({chasePairs.length}組)
                 </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div>
+          <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)', marginBottom: 8 }}>会話デモ(台本モード)</div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+              {allRobotNames.map(name => (
+                <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
+                  <input
+                    type="checkbox"
+                    checked={convoParticipants.includes(name)}
+                    disabled={!!convoStatus?.running}
+                    onChange={() => toggleConvoParticipant(name)}
+                  />
+                  <span style={{ color: colorForRobot(name) }}>{nicknameForRobot(name)}</span>
+                </label>
+              ))}
+              {allRobotNames.length === 0 && <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>フリートが見えていません</div>}
+            </div>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <button
+                onClick={startConversation}
+                disabled={!!convoStatus?.running || convoParticipants.length < 2}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 0',
+                  borderRadius: 10, border: 'none',
+                  cursor: !convoStatus?.running && convoParticipants.length >= 2 ? 'pointer' : 'not-allowed',
+                  background: 'var(--t-accent)', color: '#fff', fontSize: 13,
+                  opacity: !convoStatus?.running && convoParticipants.length >= 2 ? 1 : 0.5,
+                }}
+              ><Icon name="play_arrow" size={16} /> 開始</button>
+              <button
+                onClick={stopConversation}
+                disabled={!convoStatus?.running}
+                style={{
+                  flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 6, padding: '8px 0',
+                  borderRadius: 10, border: 'none', cursor: convoStatus?.running ? 'pointer' : 'not-allowed',
+                  background: '#cc3333', color: '#fff', fontSize: 13, opacity: convoStatus?.running ? 1 : 0.5,
+                }}
+              ><Icon name="stop" size={16} /> 停止</button>
+            </div>
+            {convoStatus && (
+              <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>
+                {convoStatus.running
+                  ? `再生中: ${convoStatus.current_turn}/${convoStatus.total_turns}ターン・経過${Math.round(convoStatus.elapsed_sec)}秒`
+                  : convoStatus.error
+                    ? `エラー: ${convoStatus.error}`
+                    : convoStatus.log.length > 0 ? `終了(経過${Math.round(convoStatus.elapsed_sec)}秒)` : '停止中'}
+              </div>
+            )}
+            {convoStatus && convoStatus.log.length > 0 && (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+                {convoStatus.log.map((entry, i) => (
+                  <div key={i} style={{
+                    fontSize: 12, background: 'var(--t-surface2)', borderRadius: 8, padding: '6px 8px',
+                    borderLeft: `3px solid ${colorForRobot(entry.speaker)}`,
+                  }}>
+                    <span style={{ fontWeight: 'bold', color: colorForRobot(entry.speaker) }}>
+                      {nicknameForRobot(entry.speaker)}
+                    </span>
+                    <span style={{ marginLeft: 6, color: 'var(--t-text)' }}>{entry.text}</span>
+                    {entry.success === false && (
+                      <span style={{ marginLeft: 6, color: '#cc3333' }} title={entry.error || '発話に失敗しました'}>
+                        <Icon name="warning" size={12} />
+                      </span>
+                    )}
+                  </div>
+                ))}
               </div>
             )}
           </div>

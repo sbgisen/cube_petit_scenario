@@ -6,6 +6,7 @@ DELETE /prompt delete_prompt
 GET /action/exists action_exists
 GET /audio/volume get_audio_volume
 GET /fleet/chase/list list_chase
+GET /fleet/conversation/status get_fleet_conversation_status
 GET /fleet/robots get_fleet_robots
 GET /history/list list_history
 GET /launch/status get_status
@@ -32,6 +33,8 @@ POST /audio/volume set_audio_volume
 POST /fleet/chase/start start_chase
 POST /fleet/chase/stop stop_chase
 POST /fleet/command post_fleet_command
+POST /fleet/conversation/start start_fleet_conversation
+POST /fleet/conversation/stop stop_fleet_conversation
 POST /history/activate activate_history
 POST /history/new new_history
 POST /launch/kill_all kill_all_ros
