@@ -54,7 +54,7 @@ export function MainTab({ ros, namespace }: Props) {
               onClick={() => toggleLayer(key)}
               style={{
                 padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-                background: layers[key] ? '#ff6600' : '#333',
+                background: layers[key] ? 'var(--t-accent)' : '#333',
                 color: '#fff', fontSize: 13,
               }}
             >

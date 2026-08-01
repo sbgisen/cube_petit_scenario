@@ -1,7 +1,9 @@
-import { useEffect, useRef, useState, useMemo } from 'react';
+import { useCallback, useEffect, useRef, useState, useMemo } from 'react';
 import * as ROSLIB from 'roslib';
 import { useRosTopic } from '../hooks/useRosTopic';
-import { useRosTf } from '../hooks/useRosTf';
+import { useRosTf, type TFTransform } from '../hooks/useRosTf';
+import { getAccentColor } from '../utils/theme';
+import { Icon } from './Icon';
 import type { LayerVisibility } from '../types/ros';
 
 interface LaserScan {
@@ -94,6 +96,11 @@ function quatToYaw(z: number, w: number) {
 
 // LiDARスキャン角度オフセット: ROS x+(前方)がcanvas上向きになるよう補正
 const SCAN_ANGLE_OFFSET = Math.PI / 2;
+// map/odomフレームでの中心合わせ・現在地に戻るボタンで使うスケール基準(表示範囲3m四方)
+const BASE_RANGE = 3;
+const ZOOM_MIN = 0.2;
+const ZOOM_MAX = 10;
+const ZOOM_BUTTON_FACTOR = 1.3;
 
 // BoyIcon SVG path (from @mui/icons-material/Boy)
 const BOY_ICON_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" width="28" height="28"><path fill="#ff4444" d="M13.49 5.48c1.1 0 2-.9 2-2s-.9-2-2-2-2 .9-2 2 .9 2 2 2zm-3.6 13.9 1-4.4 2.1 2v6h2v-7.5l-2.1-2 .6-3c1.3 1.5 3.3 2.5 5.5 2.5v-2c-1.9 0-3.5-1-4.3-2.4l-1-1.6c-.4-.6-1-1-1.7-1-.3 0-.5.1-.8.1l-5.2 2.2v4.7h2v-3.4l1.8-.7-1.6 8.1-4.9-1-.4 2 7 1.4z"/></svg>`;
@@ -157,6 +164,18 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
   mapTfRef.current = mapTf;
   const odomRef = useRef(odom);
   odomRef.current = odom;
+  // TF購読は依存配列(frame/layers切替等)が変わるたびに一旦リセットされ、次のTF publishまで
+  // null になる(/tfはtransient_localではないため)。ここで ?? 0 のまま使うと、その一瞬だけ
+  // ロボットが地図原点にジャンプして見えてしまう。最後に受信した値を保持し、購読が瞬断
+  // している間はそれを使い続けることでジャンプを防ぐ。
+  // The TF subscription resets whenever its deps change (frame/layer toggles etc.) and stays
+  // null until the next publish (/tf is not transient_local). Falling straight back to 0 during
+  // that gap made the robot appear to jump to the map origin. Keep the last received value and
+  // keep using it through brief gaps instead of snapping to 0.
+  const lastMapTfRef = useRef<TFTransform | null>(null);
+  if (mapTf) lastMapTfRef.current = mapTf;
+  const lastOdomRef = useRef<Odometry | null>(null);
+  if (odom) lastOdomRef.current = odom;
 
   const centeredForMapRef = useRef(false);
 
@@ -166,7 +185,6 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
   }, [frame]);
 
   useEffect(() => {
-    const BASE_RANGE = 3;
     const baseScale = Math.min(width, height) / 2 / BASE_RANGE;
     if (frame === 'map' && mapTf && !centeredForMapRef.current) {
       const ry = mapTf.translation.y, rx = mapTf.translation.x;
@@ -177,6 +195,26 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       const ry = odom.pose.pose.position.y, rx = odom.pose.pose.position.x;
       setView(v => ({ ...v, offsetX: ry * baseScale * v.scale, offsetY: rx * baseScale * v.scale, rotation: 0 }));
       centeredForMapRef.current = true;
+    }
+  }, [frame, mapTf, odom, width, height]);
+
+  // Google Maps風: ズーム+/-ボタン・現在地に戻るボタン
+  const zoomBy = useCallback((factor: number) => {
+    setView(v => ({ ...v, scale: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v.scale * factor)) }));
+  }, []);
+
+  const recenterOnRobot = useCallback(() => {
+    // タッチの2本指回転で傾いた表示も、現在地に戻すついでに北(画面上)へ正す
+    const baseScale = Math.min(width, height) / 2 / BASE_RANGE;
+    if (frame === 'map' && mapTf) {
+      const ry = mapTf.translation.y, rx = mapTf.translation.x;
+      setView(v => ({ ...v, offsetX: ry * baseScale * v.scale, offsetY: rx * baseScale * v.scale, rotation: 0 }));
+    } else if (frame === 'odom' && odom) {
+      const ry = odom.pose.pose.position.y, rx = odom.pose.pose.position.x;
+      setView(v => ({ ...v, offsetX: ry * baseScale * v.scale, offsetY: rx * baseScale * v.scale, rotation: 0 }));
+    } else {
+      // base_link: 自機は常に原点(画面中心)にいるので、オフセットを戻すだけで良い
+      setView(v => ({ ...v, offsetX: 0, offsetY: 0, rotation: 0 }));
     }
   }, [frame, mapTf, odom, width, height]);
 
@@ -297,10 +335,10 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     // map/odomフレーム: 原点固定・ロボット移動。base_link: ロボット固定
     const inMapFrame = frame === 'map';
     const inOdomFrame = frame === 'odom';
-    const robot_map_x = mapTf?.translation.x ?? 0;
-    const robot_map_y = mapTf?.translation.y ?? 0;
-    const robot_odom_x = odom?.pose.pose.position.x ?? 0;
-    const robot_odom_y = odom?.pose.pose.position.y ?? 0;
+    const robot_map_x = (mapTf ?? lastMapTfRef.current)?.translation.x ?? 0;
+    const robot_map_y = (mapTf ?? lastMapTfRef.current)?.translation.y ?? 0;
+    const robot_odom_x = (odom ?? lastOdomRef.current)?.pose.pose.position.x ?? 0;
+    const robot_odom_y = (odom ?? lastOdomRef.current)?.pose.pose.position.y ?? 0;
     const robotCanvasX = inMapFrame ? -robot_map_y * s : inOdomFrame ? -robot_odom_y * s : 0;
     const robotCanvasY = inMapFrame ? -robot_map_x * s : inOdomFrame ? -robot_odom_x * s : 0;
     // map座標の点を現フレームで描くときのオフセット
@@ -392,8 +430,8 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     }
 
     const robotOrientation =
-      frame === 'odom' ? odom?.pose.pose.orientation :
-      frame === 'map'  ? mapTf?.rotation :
+      frame === 'odom' ? (odom ?? lastOdomRef.current)?.pose.pose.orientation :
+      frame === 'map'  ? (mapTf ?? lastMapTfRef.current)?.rotation :
       null;
     const robotYaw = robotOrientation ? quatToYaw(robotOrientation.z, robotOrientation.w) : 0;
     const cos_yaw = Math.cos(robotYaw);
@@ -592,10 +630,11 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
       });
     }
 
-    // ロボット（mapフレームではTF位置に、それ以外は原点に描画）
-    ctx.strokeStyle = '#ff6600'; ctx.lineWidth = 2;
+    // ロボット（mapフレームではTF位置に、それ以外は原点に描画。接続中ロボットの色）
+    const robotColor = getAccentColor();
+    ctx.strokeStyle = robotColor; ctx.lineWidth = 2;
     ctx.beginPath(); ctx.arc(robotCanvasX, robotCanvasY, 12, 0, Math.PI * 2); ctx.stroke();
-    ctx.fillStyle = '#ff6600';
+    ctx.fillStyle = robotColor;
     ctx.beginPath(); ctx.arc(robotCanvasX, robotCanvasY, 6, 0, Math.PI * 2); ctx.fill();
     const fwdDx = frame !== 'base_link' ? -sin_yaw * 20 : 0;
     const fwdDy = frame !== 'base_link' ? -cos_yaw * 20 : -20;
@@ -738,7 +777,7 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
     const onWheel = (e: WheelEvent) => {
       if (modeRef.current === 'goal') return;
       e.preventDefault();
-      setView((v) => ({ ...v, scale: Math.max(0.2, Math.min(10, v.scale * (e.deltaY > 0 ? 0.9 : 1.1))) }));
+      setView((v) => ({ ...v, scale: Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, v.scale * (e.deltaY > 0 ? 0.9 : 1.1))) }));
     };
 
     canvas.addEventListener('touchstart', onTouchStart, { passive: false });
@@ -808,16 +847,32 @@ export function MapView({ ros, namespace, layers, width, height, mode = 'view', 
         style={{ borderRadius: 8, cursor: (mode === 'goal' || mode === 'initialpose') ? 'crosshair' : 'grab', touchAction: 'none' }}
         onMouseDown={handleMouseDown} onMouseMove={handleMouseMove} onMouseUp={handleMouseUp} onMouseLeave={handleMouseUp}
       />
-      <button
-        onClick={() => setView({ scale: 1, rotation: 0, offsetX: 0, offsetY: 0 })}
-        style={{
-          position: 'absolute', bottom: 8, right: 8,
-          padding: '4px 10px', borderRadius: 12, border: 'none',
-          background: 'rgba(255,255,255,0.15)', color: '#fff', fontSize: 12, cursor: 'pointer',
-        }}
-      >
-        リセット
-      </button>
+      {/* Google Maps風: 右下にズーム+/-と現在地ボタン */}
+      <div style={{ position: 'absolute', bottom: 8, right: 8, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+        <button
+          onClick={recenterOnRobot}
+          title="現在地に戻る"
+          style={{
+            width: 46, height: 46, borderRadius: '50%', border: '1px solid #fff', cursor: 'pointer',
+            background: 'rgba(0,0,0,0.6)', color: '#00ff88',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+          }}
+        ><Icon name="my_location" size={24} /></button>
+        <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden', background: 'rgba(0,0,0,0.6)', border: '1px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+          <button
+            onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
+            title="ズームイン"
+            style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          ><Icon name="add" size={22} /></button>
+          <div style={{ height: 1, background: 'rgba(255,255,255,0.35)' }} />
+          <button
+            onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
+            title="ズームアウト"
+            style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+          ><Icon name="remove" size={22} /></button>
+        </div>
+      </div>
     </div>
   );
 }

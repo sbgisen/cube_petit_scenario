@@ -44,8 +44,11 @@ async def start_launch(
         keepout: Optional[str] = None) -> LaunchResponse:
     if target not in core.LAUNCH_COMMANDS:
         return LaunchResponse(ok=False, message=f'Unknown target: {target}')
-    if core.processes[target] and core.processes[target].poll() is None:
-        return LaunchResponse(ok=False, message=f'{target} is already running')
+    # このAPI自身が起動したプロセスだけでなく、systemdサービス等で外部起動されている
+    # 場合も検知する(でないと二重起動して同名ノードが衝突し、片方が不安定になる)
+    status = await core.get_launch_status()
+    if status.get(target):
+        return LaunchResponse(ok=False, message=f'{target} is already running (別プロセス/systemdサービス含む)')
     if target in ('bringup', 'rosbridge'):
         subprocess.run(['fuser', '-k', '9090/tcp'], capture_output=True)
         time.sleep(0.5)
@@ -62,6 +65,14 @@ async def start_launch(
             kp_yaml = str(kp_dir / 'map_keepout.yaml') if kp_dir else keepout
             cmd.append(f'keepout:={kp_yaml}')
             log_msg += f' keepout:={kp_yaml}'
+    elif target == 'shared_controller_hub':
+        # この機体をhub役(コントローラ物理接続側)として起動する。他機は常時receiver役
+        # (bringupに統合済み)。robot_names/toggle_buttonsの対応順はcube_petit_shared_controller
+        # 側の割り当てに合わせる。
+        cmd.append('role:=hub')
+        cmd.append('robot_names:=cube_petit_orange,cube_petit_pink,cube_petit_yellow')
+        cmd.append('toggle_buttons:=2,1,3')
+        log_msg += ' role:=hub robot_names:=cube_petit_orange,cube_petit_pink,cube_petit_yellow toggle_buttons:=2,1,3'
     core.processes[target] = subprocess.Popen(cmd, env=core.ROS_ENV, preexec_fn=os.setsid)
     return LaunchResponse(ok=True, message=log_msg)
 
@@ -118,12 +129,10 @@ async def kill_all_ros() -> dict:
 
 @router.get('/launch/status')
 async def get_status() -> dict:
-    try:
-        node_output = await core.get_node_list_output()
-        status = {}
-        for target, marker in core.LAUNCH_NODE_MARKERS.items():
-            proc_alive = core.processes[target] is not None and core.processes[target].poll() is None
-            status[target] = proc_alive or (marker in node_output)
-        return status
-    except Exception:
-        return {target: proc is not None and proc.poll() is None for target, proc in core.processes.items()}
+    # ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET のため、同じサブネット上の他機のノードも
+    # ros2 node list に出てくる。名前空間で絞らないと、例えば pink の
+    # rosbridge_websocket ノードを orange 側の判定が誤って拾ってしまう
+    # (rosbridgeが実際は落ちてるのに「起動中」と表示され続けるバグの原因)。
+    # 実装は core.get_launch_status() に共通化済み（start_launch の二重起動防止チェックと
+    # 同じロジックを共有する）。
+    return await core.get_launch_status()

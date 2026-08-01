@@ -91,7 +91,21 @@ async def get_system_devices() -> dict:
     # シリアルデバイス（udevシンボリックリンク）
     result['lidar'] = os.path.exists('/dev/ttyLD06-19')
     result['imu'] = os.path.exists('/dev/ttyWitMotion')
+    # /dev/ttyCANableのudevルールはCANable2(idVendor=16d0, idProduct=117e)専用で、
+    # 別機種のCANableボード(例: pinkのProtofusion Labs製、CANtactファーム、
+    # idVendor=ad50)ではシンボリックリンクが作られず誤って「未検出」になる。
+    # 実体はslcandプロセスの有無(ボード機種によらずCAN0を動かしていれば必ず居る)
+    # で代替検出する。
     result['canable'] = os.path.exists('/dev/ttyCANable')
+    if not result['canable']:
+        try:
+            r = await asyncio.to_thread(subprocess.run, ['pgrep', '-x', 'slcand'],
+                                        capture_output=True,
+                                        text=True,
+                                        timeout=3)
+            result['canable'] = r.returncode == 0
+        except Exception:
+            pass
 
     # USB接続（lsusb）
     try:
@@ -104,6 +118,175 @@ async def get_system_devices() -> dict:
         result['oak'] = False
 
     return result
+
+
+@router.post('/system/can/restart')
+async def restart_can() -> dict:
+    """CAN0(slcand経由のCANable)を再起動する.
+
+    can@ttyCANable.serviceの`startCan.sh`は自身のhealth-checkでslcandプロセスの
+    生死とcan0インターフェースの有無しか見ておらず、slcandもcan0も生きたまま
+    フレームを受信しなくなる("止まっているのに気づけない")ケースを検知できない。
+    この手動リスタートはそのケースの救済用(操作タブのCAN0受信停止表示から呼ぶ)。
+    """
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['sudo', 'systemctl', 'restart', 'can@ttyCANable.service'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=15)
+        if r.returncode == 0:
+            return {'ok': True, 'message': 'CAN0を再起動しました'}
+        return {'ok': False, 'message': (r.stderr or r.stdout).strip() or f'exit code {r.returncode}'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+
+
+_CONTROLLER_NAME_PATTERNS = ('wireless controller', 'dualshock', 'dualsense', 'xbox', 'joy-con')
+
+
+def _is_controller_name(name: str) -> bool:
+    lname = name.lower()
+    return any(p in lname for p in _CONTROLLER_NAME_PATTERNS)
+
+
+def _parse_bluetoothctl_devices(stdout: str) -> list[dict]:
+    """`bluetoothctl devices` 系コマンドの `Device <MAC> <Name>` 形式を解析する."""
+    devices = []
+    for line in stdout.splitlines():
+        parts = line.strip().split(maxsplit=2)
+        if len(parts) == 3 and parts[0] == 'Device':
+            devices.append({'mac': parts[1], 'name': parts[2]})
+    return devices
+
+
+async def _get_battery_percentage(mac: str) -> int | None:
+    """`bluetoothctl info <mac>`のBattery Percentage行を読む.
+
+    BlueZのBattery Service(GATT)経由の値で、機種によっては公開されない
+    (例: PS4 Wireless Controllerはクラシック接続のみだと出ないことが多い)。
+    その場合はNoneを返す(フロントエンドは残量欄を単に表示しない)。
+    """
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'info', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
+        m = re.search(r'Battery Percentage:.*\((\d+)%\)', r.stdout)
+        return int(m.group(1)) if m else None
+    except Exception:
+        return None
+
+
+@router.get('/system/bluetooth/controllers')
+async def get_bluetooth_controllers() -> dict:
+    """コントローラ(PS4/PS5/Xbox等)一覧を返す(取得できればバッテリー残量も).
+
+    BlueZの"Connected"判定はHIDプロファイルが実際に繋がっていなくてもtrueに
+    なることがあり(逆に不安定なこともある)、あまり厳密には信用できない。
+    ペアリング済み(Paired)の中から名前がコントローラらしきものを拾い、
+    別途Connected一覧と突き合わせて connected フラグを付けて返す方式にした。
+    """
+    try:
+        r_paired = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Paired'],
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=5)
+        r_connected = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices', 'Connected'],
+                                              capture_output=True,
+                                              text=True,
+                                              timeout=5)
+        connected_macs = {d['mac'] for d in _parse_bluetoothctl_devices(r_connected.stdout)}
+        controllers = [d for d in _parse_bluetoothctl_devices(r_paired.stdout) if _is_controller_name(d['name'])]
+        for dev in controllers:
+            dev['connected'] = dev['mac'] in connected_macs
+            dev['battery'] = await _get_battery_percentage(dev['mac']) if dev['connected'] else None
+        return {'connected': controllers}
+    except Exception as e:
+        return {'connected': [], 'error': str(e)}
+
+
+@router.post('/system/bluetooth/disconnect')
+async def disconnect_bluetooth_controller(mac: str) -> dict:
+    """指定したコントローラをBluetooth切断する(ペア情報は保持、再接続はペアリングボタンから)."""
+    try:
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'disconnect', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10)
+        ok = 'Successful disconnected' in r.stdout or r.returncode == 0
+        return {'ok': ok, 'message': (r.stdout or r.stderr).strip()}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+
+
+@router.post('/system/bluetooth/pair')
+async def pair_bluetooth_controller() -> dict:
+    """コントローラのペアリングモード(PS+SHAREボタン長押し等)中にスキャンして自動ペア接続する.
+
+    bluetoothctlの非対話CLI(BlueZ 5.5x以降)で power on → scan(タイムアウト付き)
+    → 新規に見つかったコントローラらしき機器を pair/trust/connect する。
+    見つからなければその旨を返す(呼び出し元でユーザーに再試行を促す)。
+    """
+    try:
+        # agentを登録しないと pair は「見た目はPaired」でも正しくボンディングされず、
+        # bluetoothdがHID接続を "Rejected connection from !bonded device" で拒否する
+        # (実機で確認: Paired: yes だが Bonded: no のまま接続が通らないケースがあった)。
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'agent', 'NoInputNoOutput'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5)
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'default-agent'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5)
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'power', 'on'],
+                                capture_output=True,
+                                text=True,
+                                timeout=5)
+        await asyncio.to_thread(subprocess.run, ['bluetoothctl', '--timeout', '12', 'scan', 'on'],
+                                capture_output=True,
+                                text=True,
+                                timeout=20)
+        r = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'devices'],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=5)
+        candidates = [d for d in _parse_bluetoothctl_devices(r.stdout) if _is_controller_name(d['name'])]
+        if not candidates:
+            return {
+                'ok': False,
+                'message': 'コントローラが見つかりませんでした。ペアリングモード'
+                           '(PSボタン+SHAREボタン長押し)にしてから再試行してください',
+            }
+
+        connected = []
+        for dev in candidates:
+            mac = dev['mac']
+            # removeしてから即pairすると、コントローラがまだ再検出可能な状態で
+            # advertiseし続けている保証がなく「Device not available」で失敗しうる
+            # (実機で確認)。removeはせず、agent登録済みの状態でそのままpairし直す
+            # (既存の中途半端なペア情報があってもpairはボンディングをやり直す)。
+            await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'pair', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10)
+            await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'trust', mac],
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=10)
+            r_conn = await asyncio.to_thread(subprocess.run, ['bluetoothctl', 'connect', mac],
+                                             capture_output=True,
+                                             text=True,
+                                             timeout=10)
+            if 'Connection successful' in r_conn.stdout or 'already connected' in r_conn.stdout.lower():
+                connected.append(dev)
+
+        if connected:
+            names = '、'.join(d['name'] for d in connected)
+            return {'ok': True, 'message': f'{names} に接続しました', 'connected': connected}
+        return {'ok': False, 'message': 'コントローラは見つかりましたが接続できませんでした'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
 
 
 @router.get('/ros/nodes')

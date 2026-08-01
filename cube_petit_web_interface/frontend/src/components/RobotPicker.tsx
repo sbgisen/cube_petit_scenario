@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { Icon } from './Icon';
 
 // Tier 2 "multi-robot picker": shows every robot currently visible on the
 // zenoh fleet network (cube_petit_fleet_bridge, a separate ROS2 package in
@@ -13,6 +14,8 @@ interface FleetRobotState {
   pose: { x: number; y: number; yaw: number } | null;
   battery: number | null;
   map_name: string | null;
+  bringup_active: boolean | null;
+  nav_active: boolean | null;
   online: boolean;
   last_seen_sec_ago: number;
 }
@@ -31,7 +34,7 @@ interface Props {
 
 const POLL_MS = 2000;
 
-const ROBOT_COLOR: Record<string, string> = {
+export const ROBOT_COLOR: Record<string, string> = {
   orange: '#ff6600',
   pink: '#ff4da6',
   yellow: '#e6c200',
@@ -40,9 +43,51 @@ const ROBOT_COLOR: Record<string, string> = {
   blue: '#3498db',
 };
 
-function colorForRobot(name: string): string {
+export const ROBOT_NICKNAME: Record<string, string> = {
+  orange: 'オレンジプチ',
+  pink: 'ピンクプチ',
+  yellow: 'イエロープチ',
+  purple: 'パープルプチ',
+  green: 'グリーンプチ',
+  blue: 'ブループチ',
+};
+
+export function colorForRobot(name: string): string {
   const color = name.replace(/^cube_petit_/, '');
   return ROBOT_COLOR[color] ?? '#888888';
+}
+
+function batteryIconName(pct: number): string {
+  if (pct >= 95) return 'battery_full';
+  if (pct >= 80) return 'battery_6_bar';
+  if (pct >= 60) return 'battery_5_bar';
+  if (pct >= 40) return 'battery_4_bar';
+  if (pct >= 20) return 'battery_3_bar';
+  if (pct >= 10) return 'battery_2_bar';
+  return 'battery_alert';
+}
+
+/**
+ * Small "bringup"/"navigation" status icon, shared by RobotPicker and
+ * FleetDashboard. Renders nothing when `active` is `null` (older
+ * zenoh_connector.py that doesn't publish this field yet, or no data
+ * received so far) -- true/false vs. "not yet known" are deliberately
+ * distinguished rather than treating null as false.
+ */
+export function ActiveStateIcon({ name, active, activeLabel, inactiveLabel }: {
+  name: string; active: boolean | null; activeLabel: string; inactiveLabel: string;
+}) {
+  if (active === null) return null;
+  return (
+    <span style={{ display: 'flex', alignItems: 'center', opacity: active ? 1 : 0.35 }} title={active ? activeLabel : inactiveLabel}>
+      <Icon name={name} size={14} />
+    </span>
+  );
+}
+
+export function nicknameForRobot(namespace: string): string {
+  const color = namespace.replace(/^cube_petit_/, '');
+  return ROBOT_NICKNAME[color] ?? namespace;
 }
 
 /**
@@ -51,7 +96,7 @@ function colorForRobot(name: string): string {
  * (matches cube_petit_fleet_bridge's `zenoh_router_endpoint` default naming
  * convention: 'tcp/cube-petit-orange.local:7447').
  */
-function robotNameToHost(name: string): string {
+export function robotNameToHost(name: string): string {
   return `${name.replace(/_/g, '-')}.local`;
 }
 
@@ -71,18 +116,26 @@ export function RobotPicker({ apiUrl, currentNamespace, onSelectRobot }: Props) 
   }, [apiUrl]);
 
   // Zenoh watcher not running (eclipse-zenoh not installed / router unreachable)
-  // or no robot has published state yet: hide the picker entirely so Tier 1
-  // (single-robot operation via host switching) is unaffected.
-  if (!fleet || !fleet.available) return null;
+  // or no robot has published state yet: still render the drawer (the user opened
+  // it on purpose), just show a friendly empty/unavailable state instead of a list.
+  if (!fleet || !fleet.available) {
+    return (
+      <div style={{ padding: '16px 4px', fontSize: 13, color: 'var(--t-text-dim)' }}>
+        フリート機能は利用できません(zenoh未接続)
+      </div>
+    );
+  }
   const names = Object.keys(fleet.robots).sort();
-  if (names.length === 0) return null;
+  if (names.length === 0) {
+    return (
+      <div style={{ padding: '16px 4px', fontSize: 13, color: 'var(--t-text-dim)' }}>
+        他の機体がまだ見つかっていません
+      </div>
+    );
+  }
 
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 8, padding: '6px 16px', overflowX: 'auto',
-      background: 'var(--t-surface)', borderBottom: '1px solid var(--t-border)', flexShrink: 0,
-    }}>
-      <span style={{ fontSize: 11, color: 'var(--t-text-dim)', flexShrink: 0 }}>フリート</span>
+    <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
       {names.map(name => {
         const robot = fleet.robots[name];
         const isCurrent = name === currentNamespace;
@@ -96,22 +149,46 @@ export function RobotPicker({ apiUrl, currentNamespace, onSelectRobot }: Props) 
               ? `${name} - 最終更新 ${robot.last_seen_sec_ago}秒前`
               : `${name} - オフライン(最終更新 ${robot.last_seen_sec_ago}秒前)`}
             style={{
-              display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0,
-              padding: '5px 12px', borderRadius: 20, cursor: 'pointer',
+              display: 'flex', alignItems: 'center', gap: 10, width: '100%', textAlign: 'left',
+              padding: '10px 14px', borderRadius: 12, cursor: 'pointer',
               border: isCurrent ? `2px solid ${colorForRobot(name)}` : '1px solid var(--t-border2)',
               background: isCurrent ? 'var(--t-surface2)' : 'var(--t-bg)',
-              color: 'var(--t-text)', fontSize: 12,
+              color: 'var(--t-text)', fontSize: 14,
               opacity: robot.online ? 1 : 0.45,
             }}
           >
             <div style={{
-              width: 8, height: 8, borderRadius: '50%', flexShrink: 0,
+              width: 10, height: 10, borderRadius: '50%', flexShrink: 0,
               background: robot.online ? colorForRobot(name) : '#555555',
               boxShadow: robot.online ? `0 0 4px ${colorForRobot(name)}88` : 'none',
             }} />
-            <span>{label}</span>
-            {batteryPct != null && <span style={{ color: 'var(--t-text-dim)' }}>{batteryPct}%</span>}
-            {robot.map_name && <span style={{ color: 'var(--t-text-dim)' }}>{robot.map_name}</span>}
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 3 }}>
+              <span>{nicknameForRobot(name)}</span>
+              {(batteryPct != null || robot.map_name || robot.bringup_active != null || robot.nav_active != null) && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: 10, color: 'var(--t-text-dim)', fontSize: 12 }}>
+                  {batteryPct != null && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 2 }} title="バッテリー残量">
+                      <Icon name={batteryIconName(batteryPct)} size={14} />
+                      {batteryPct}%
+                    </span>
+                  )}
+                  {robot.map_name && (
+                    <span style={{ display: 'flex', alignItems: 'center', gap: 2, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title="使用中のマップ">
+                      <Icon name="map" size={14} />
+                      {robot.map_name}
+                    </span>
+                  )}
+                  <ActiveStateIcon
+                    name="power_settings_new" active={robot.bringup_active}
+                    activeLabel="bringup: 起動中" inactiveLabel="bringup: 停止中"
+                  />
+                  <ActiveStateIcon
+                    name="near_me" active={robot.nav_active}
+                    activeLabel="navigation: 起動中" inactiveLabel="navigation: 停止中"
+                  />
+                </div>
+              )}
+            </div>
           </button>
         );
       })}

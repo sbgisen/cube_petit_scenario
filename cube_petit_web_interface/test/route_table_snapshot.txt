@@ -5,6 +5,7 @@ DELETE /places/remove remove_place
 DELETE /prompt delete_prompt
 GET /action/exists action_exists
 GET /audio/volume get_audio_volume
+GET /fleet/chase/list list_chase
 GET /fleet/robots get_fleet_robots
 GET /history/list list_history
 GET /launch/status get_status
@@ -20,6 +21,7 @@ GET /prompt/list list_prompts
 GET /ros/conversation/status get_conversation_status
 GET /ros/nodes get_ros_nodes
 GET /ros/robot_pose get_robot_pose_endpoint
+GET /system/bluetooth/controllers get_bluetooth_controllers
 GET /system/devices get_system_devices
 GET /system/namespace get_namespace
 GET,HEAD /docs swagger_ui_html
@@ -27,11 +29,15 @@ GET,HEAD /docs/oauth2-redirect swagger_ui_redirect
 GET,HEAD /openapi.json openapi
 GET,HEAD /redoc redoc_html
 POST /audio/volume set_audio_volume
+POST /fleet/chase/start start_chase
+POST /fleet/chase/stop stop_chase
+POST /fleet/command post_fleet_command
 POST /history/activate activate_history
 POST /history/new new_history
 POST /launch/kill_all kill_all_ros
 POST /launch/{target}/start start_launch
 POST /launch/{target}/stop stop_launch
+POST /map/base/save save_map_base
 POST /map/initial_pose set_initial_pose
 POST /map/keepout/save save_keepout
 POST /map/load load_map
@@ -39,10 +45,13 @@ POST /map/places/add add_map_place
 POST /map/places/add_current add_map_place_current
 POST /map/places/rename rename_map_place
 POST /map/places/reorder reorder_map_places
+POST /map/receive receive_map
 POST /map/rooms/add add_map_room
 POST /map/rooms/rename rename_map_room
 POST /map/rotate rotate_map
 POST /map/save save_map
+POST /map/share share_map
+POST /map/slam/continue continue_slam_map
 POST /places/add add_place
 POST /places/add_manual add_place_manual
 POST /prompt set_prompt
@@ -50,3 +59,6 @@ POST /prompt/activate activate_prompt
 POST /prompt/new new_prompt
 POST /ros/conversation/context add_context
 POST /ros/conversation/enable enable_conversation
+POST /system/bluetooth/disconnect disconnect_bluetooth_controller
+POST /system/bluetooth/pair pair_bluetooth_controller
+POST /system/can/restart restart_can

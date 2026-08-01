@@ -1,4 +1,24 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Icon } from './Icon';
+import { robotNameToHost } from './RobotPicker';
+
+const ZOOM_MIN = 0.1;
+const ZOOM_MAX = 10;
+const ZOOM_BUTTON_FACTOR = 1.3;
+
+// 「きれいな」目盛り(1,2,5 x 10^n [m])のうち、maxPx以下で最大のものを選ぶ
+// (Googleマップ等の縮尺バーと同じ考え方)
+function niceScaleBarMeters(targetMeters: number): number {
+  if (!isFinite(targetMeters) || targetMeters <= 0) return 1;
+  const exp = Math.floor(Math.log10(targetMeters));
+  const base = Math.pow(10, exp);
+  let best = base;
+  for (const mult of [1, 2, 5, 10]) {
+    const candidate = mult * base;
+    if (candidate <= targetMeters) best = candidate;
+  }
+  return best;
+}
 
 interface Props {
   namespace: string;
@@ -60,6 +80,26 @@ export function MapTab({ namespace, apiUrl }: Props) {
   const [robotPose, setRobotPose] = useState<RobotPose | null>(null);
   const [msg, setMsg] = useState('');
 
+  // マップ共有: フリート上の他ロボット一覧(自分は除く)を選んでHTTP転送する
+  const [fleetRobotNames, setFleetRobotNames] = useState<string[]>([]);
+  const [shareTarget, setShareTarget] = useState('');
+  const [sharing, setSharing] = useState(false);
+  useEffect(() => {
+    fetch(`${apiUrl}/fleet/robots`).then(r => r.json())
+      .then(d => setFleetRobotNames(Object.keys(d.robots ?? {}).filter(n => n !== namespace)))
+      .catch(() => {});
+  }, [apiUrl, namespace]);
+  const shareMap = async () => {
+    if (!selectedMap || !shareTarget) return;
+    setSharing(true);
+    const r = await fetch(`${apiUrl}/map/share`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ map_name: selectedMap, target_host: robotNameToHost(shareTarget) }),
+    }).then(res => res.json()).catch(() => ({ ok: false, message: '通信エラー' }));
+    setSharing(false);
+    showMsg(r.ok ? `共有完了: ${r.message}` : `共有失敗: ${r.message}`);
+  };
+
   // SLAM map save
   const [saveMapName, setSaveMapName] = useState('');
   const [saveDest, setSaveDest] = useState<'extra' | 'base'>('extra');
@@ -94,6 +134,11 @@ export function MapTab({ namespace, apiUrl }: Props) {
   // canvas
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const keepoutCanvasRef = useRef<HTMLCanvasElement>(null);
+  // 地図本体(occupancy grid)を直接編集するための編集用キャンバス。keepoutと同じ仕組みで
+  // 小さいノイズ点(誤検出による孤立した黒点)を消しゴムで消せるようにする。
+  // Editable canvas for the base occupancy grid map itself, mirroring the keepout canvas, so
+  // small noise specks (isolated false-positive occupied pixels) can be erased directly.
+  const mapCanvasRef = useRef<HTMLCanvasElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
@@ -101,8 +146,17 @@ export function MapTab({ namespace, apiUrl }: Props) {
   const drawing = useRef(false);
   const rectStart = useRef<{ x: number; y: number } | null>(null);
   const keepoutDirty = useRef(false);
+  const mapDirty = useRef(false);
+  // 編集対象: keepoutマスク か 地図本体か
+  const [editTarget, setEditTarget] = useState<'keepout' | 'map'>('keepout');
   const undoStack = useRef<ImageData[]>([]);
   const [canUndo, setCanUndo] = useState(false);
+  // 編集対象を切り替えたらUndoスタックは持ち越さない(別キャンバスのスナップショットが
+  // 混ざるのを防ぐ)。Reset the undo stack on target switch so snapshots from the other
+  // canvas never get applied to the wrong one.
+  useEffect(() => {
+    undoStack.current = []; setCanUndo(false);
+  }, [editTarget]);
 
   // map lock (iPad drawing)
   const [mapLocked, setMapLocked] = useState(false);
@@ -160,6 +214,15 @@ export function MapTab({ namespace, apiUrl }: Props) {
     } catch { ctx.clearRect(0, 0, kc.width, kc.height); }
     undoStack.current = []; setCanUndo(false);
   }, [keepoutImg, mapImg]);
+
+  // ---- 地図本体の編集用キャンバス初期化(mapImgをそのまま複製、mapImgの更新ごとに作り直す) ----
+  useEffect(() => {
+    if (!mapImg) return;
+    const mc = mapCanvasRef.current; if (!mc) return;
+    mc.width = mapImg.width; mc.height = mapImg.height;
+    mc.getContext('2d')!.drawImage(mapImg, 0, 0);
+    mapDirty.current = false;
+  }, [mapImg]);
 
   // ---- fit canvas on load ----
   useEffect(() => {
@@ -236,10 +299,43 @@ export function MapTab({ namespace, apiUrl }: Props) {
     };
   }, [meta, mapImg]);
 
+  // ---- Google Maps風のズーム(+/-)・現在地ボタン・縮尺バー ----
+  const zoomBy = useCallback((factor: number) => {
+    const cont = containerRef.current;
+    if (!cont) return;
+    const cx = cont.clientWidth / 2, cy = cont.clientHeight / 2;
+    setScale(s => {
+      const ns = Math.max(ZOOM_MIN, Math.min(ZOOM_MAX, s * factor));
+      setPan(p => ({ x: cx - (cx - p.x) * (ns / s), y: cy - (cy - p.y) * (ns / s) }));
+      return ns;
+    });
+  }, []);
+
+  const recenterOnRobot = useCallback(() => {
+    const cont = containerRef.current;
+    if (!cont || !mapImg || !robotPose) return;
+    const { ix, iy } = worldToImg(robotPose.x, robotPose.y);
+    const cos = Math.cos(viewRot), sin = Math.sin(viewRot);
+    const cw = cont.clientWidth / 2, ch = cont.clientHeight / 2;
+    setPan({
+      x: cw - mapImg.width * scale / 2 - scale * (cos * ix - sin * iy),
+      y: ch - mapImg.height * scale / 2 - scale * (sin * ix + cos * iy),
+    });
+  }, [mapImg, robotPose, scale, viewRot, worldToImg]);
+
+  // 1マス(map画像1px) = meta.resolution [m] なので、画面上の1mあたりpx数 = scale / resolution
+  const scaleBar = useMemo(() => {
+    if (!meta || !mapImg) return null;
+    const pxPerMeter = scale / meta.resolution;
+    const meters = niceScaleBarMeters(120 / pxPerMeter);
+    return { meters, px: meters * pxPerMeter };
+  }, [meta, mapImg, scale]);
+
   // ---- render ----
   const render = useCallback(() => {
     const canvas = canvasRef.current;
     const kc = keepoutCanvasRef.current;
+    const mc = mapCanvasRef.current;
     if (!canvas || !mapImg) return;
     const ctx = canvas.getContext('2d')!;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -248,7 +344,10 @@ export function MapTab({ namespace, apiUrl }: Props) {
     ctx.translate(piv.x, piv.y);
     ctx.rotate(viewRot);
     ctx.scale(scale, scale);
-    ctx.drawImage(mapImg, -mapImg.width / 2, -mapImg.height / 2);
+    // 地図編集(消しゴム等)を反映するため、mapImgではなく編集用キャンバス(mc)から描く。
+    // mcが未初期化の間だけmapImgへフォールバック。
+    if (mc && mc.width > 0) ctx.drawImage(mc, -mapImg.width / 2, -mapImg.height / 2);
+    else ctx.drawImage(mapImg, -mapImg.width / 2, -mapImg.height / 2);
 
     // keepout overlay
     if (kc && kc.width > 0) {
@@ -377,15 +476,18 @@ export function MapTab({ namespace, apiUrl }: Props) {
   }, [render]);
 
   // ---- keepout drawing helpers ----
+  // 編集対象(keepoutマスク/地図本体)に応じたキャンバスを返す
+  const editCanvasRef = () => editTarget === 'map' ? mapCanvasRef : keepoutCanvasRef;
+
   const getKcCtx = () => {
-    const kc = keepoutCanvasRef.current;
+    const kc = editCanvasRef().current;
     if (!kc || !mapImg) return null;
     if (kc.width === 0) { kc.width = mapImg.width; kc.height = mapImg.height; }
     return kc.getContext('2d')!;
   };
 
   const saveUndo = () => {
-    const kc = keepoutCanvasRef.current; if (!kc || kc.width === 0) return;
+    const kc = editCanvasRef().current; if (!kc || kc.width === 0) return;
     try {
       const snap = kc.getContext('2d')!.getImageData(0, 0, kc.width, kc.height);
       undoStack.current.push(snap);
@@ -395,14 +497,14 @@ export function MapTab({ namespace, apiUrl }: Props) {
   };
 
   const undo = () => {
-    const kc = keepoutCanvasRef.current; if (!kc || !undoStack.current.length) return;
+    const kc = editCanvasRef().current; if (!kc || !undoStack.current.length) return;
     kc.getContext('2d')!.putImageData(undoStack.current.pop()!, 0, 0);
     setCanUndo(undoStack.current.length > 0); render();
   };
 
   const drawAt = (ix: number, iy: number) => {
     const ctx = getKcCtx(); if (!ctx) return;
-    keepoutDirty.current = true;
+    if (editTarget === 'map') mapDirty.current = true; else keepoutDirty.current = true;
     ctx.fillStyle = tool === 'eraser' ? '#ffffff' : '#000000';
     ctx.beginPath(); ctx.arc(ix, iy, tool === 'eraser' ? brushSize * 2 : brushSize, 0, Math.PI * 2);
     ctx.fill(); render();
@@ -489,7 +591,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
       const { ix, iy } = imgCoords(clientX, clientY);
       const ctx = getKcCtx();
       if (ctx) {
-        keepoutDirty.current = true;
+        if (editTarget === 'map') mapDirty.current = true; else keepoutDirty.current = true;
         ctx.fillStyle = '#000000';
         ctx.fillRect(Math.min(rectStart.current.x, ix), Math.min(rectStart.current.y, iy),
           Math.abs(ix - rectStart.current.x), Math.abs(iy - rectStart.current.y));
@@ -603,6 +705,26 @@ export function MapTab({ namespace, apiUrl }: Props) {
       });
       const d = await r.json();
       showMsg(d.ok ? 'keepout保存完了' : '保存失敗'); keepoutDirty.current = false;
+    }, 'image/png');
+  };
+
+  // 地図本体(occupancy grid)への上書き保存。実際のナビゲーションに使われるファイルを
+  // 直接書き換えるため、keepout保存より影響が大きい。誤操作防止にconfirmを挟む
+  // (バックエンド側でも上書き前に.bakを残す)。
+  const saveMapImage = () => {
+    const mc = mapCanvasRef.current;
+    if (!mc || !selectedMap) { showMsg('既存マップを選択してください'); return; }
+    if (!confirm('地図本体を上書き保存します。ナビゲーションで実際に使われる地図が変わります。よろしいですか？')) return;
+    mc.toBlob(async blob => {
+      if (!blob) return;
+      const ab = await blob.arrayBuffer();
+      const b64 = btoa(String.fromCharCode(...new Uint8Array(ab)));
+      const r = await fetch(`${apiUrl}/map/base/save`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ map_name: selectedMap, png_base64: b64 }),
+      });
+      const d = await r.json();
+      showMsg(d.ok ? '地図保存完了' : '保存失敗'); mapDirty.current = false;
     }, 'image/png');
   };
 
@@ -757,7 +879,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
   };
   const btnStyle = (active?: boolean): React.CSSProperties => ({
     padding: '5px 10px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 12,
-    background: active ? '#ff6600' : 'var(--t-surface2)', color: active ? '#fff' : 'var(--t-text)',
+    background: active ? 'var(--t-accent)' : 'var(--t-surface2)', color: active ? '#fff' : 'var(--t-text)',
   });
 
   const MODE_DEFS: [EditorMode, string, string][] = [
@@ -801,7 +923,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
             ))}
           </div>
           <button onClick={saveCurrentMap} disabled={saving}
-            style={{ ...btnStyle(), background: saving ? 'var(--t-border)' : '#ff6600', color: '#fff', width: '100%' }}>
+            style={{ ...btnStyle(), background: saving ? 'var(--t-border)' : 'var(--t-accent)', color: '#fff', width: '100%' }}>
             {saving ? '保存中...' : 'SLAMマップ保存'}
           </button>
         </div>
@@ -824,6 +946,14 @@ export function MapTab({ namespace, apiUrl }: Props) {
           {editorMode === 'edit' && (
             <>
               <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
+                {(['keepout', 'map'] as const).map(target => (
+                  <button key={target} onClick={() => setEditTarget(target)}
+                    style={{ ...btnStyle(editTarget === target), flex: 1 }}>
+                    {target === 'keepout' ? 'keepout編集' : '地図本体編集'}
+                  </button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 4, marginBottom: 8 }}>
                 {(['pen', 'rect', 'eraser'] as Tool[]).map(t => (
                   <button key={t} onClick={() => setTool(t)} style={btnStyle(tool === t)}>
                     {t === 'pen' ? 'ペン' : t === 'rect' ? '矩形' : '消しゴム'}
@@ -835,23 +965,27 @@ export function MapTab({ namespace, apiUrl }: Props) {
                   <span>サイズ</span><span>{brushSize}px</span>
                 </div>
                 <input type="range" min={1} max={40} value={brushSize} onChange={e => setBrushSize(Number(e.target.value))}
-                  style={{ width: '100%', accentColor: '#ff6600' }} />
+                  style={{ width: '100%', accentColor: 'var(--t-accent)' }} />
               </div>
               <div style={{ display: 'flex', gap: 5, marginBottom: 10 }}>
                 <button onClick={undo} disabled={!canUndo} style={{ ...btnStyle(), flex: 1, opacity: canUndo ? 1 : 0.4 }}>↩ 戻す</button>
-                <button onClick={saveKeeout} style={{ ...btnStyle(), flex: 1, background: '#ff6600', color: '#fff' }}>keepout保存</button>
+                {editTarget === 'keepout' ? (
+                  <button onClick={saveKeeout} style={{ ...btnStyle(), flex: 1, background: 'var(--t-accent)', color: '#fff' }}>keepout保存</button>
+                ) : (
+                  <button onClick={saveMapImage} style={{ ...btnStyle(), flex: 1, background: '#cc6600', color: '#fff' }}>地図保存</button>
+                )}
               </div>
               <div style={{ fontSize: 11, color: 'var(--t-text-muted)', marginBottom: 4 }}>
                 回転 <span style={{ color: 'var(--t-text-dim)' }}>{rotDeg.toFixed(1)}°</span>
               </div>
               <input type="range" min={-180} max={180} step={0.5} value={rotDeg} onChange={e => setRotDeg(Number(e.target.value))}
-                style={{ width: '100%', accentColor: '#ff6600', marginBottom: 5 }} />
+                style={{ width: '100%', accentColor: 'var(--t-accent)', marginBottom: 5 }} />
               <div style={{ display: 'flex', gap: 5, marginBottom: 5, flexWrap: 'nowrap', alignItems: 'center' }}>
                 <input type="number" step={0.5} value={rotDeg.toFixed(1)} onChange={e => setRotDeg(Number(e.target.value))}
                   style={{ flex: 1, minWidth: 0, padding: '4px 6px', borderRadius: 6, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12 }} />
                 <button onClick={() => setRotDeg(0)} style={{ ...btnStyle(), whiteSpace: 'nowrap', flexShrink: 0 }}>リセット</button>
               </div>
-              <button onClick={applyRotation} style={{ ...btnStyle(), background: selectedMap ? '#ff6600' : 'var(--t-border)', color: '#fff', width: '100%' }}>
+              <button onClick={applyRotation} style={{ ...btnStyle(), background: selectedMap ? 'var(--t-accent)' : 'var(--t-border)', color: '#fff', width: '100%' }}>
                 ファイルに適用
               </button>
             </>
@@ -884,7 +1018,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
                 <div style={{ display: 'flex', gap: 6 }}>
                   <button onClick={() => { setPlaceDraft(null); placeDraftRef.current = null; }} style={{ ...btnStyle(), flex: 1 }}>キャンセル</button>
                   <button onClick={confirmPlace} disabled={!placeName.trim() || !selectedMap}
-                    style={{ ...btnStyle(), flex: 1, background: placeName.trim() && selectedMap ? '#ff6600' : 'var(--t-border)', color: '#fff' }}>
+                    style={{ ...btnStyle(), flex: 1, background: placeName.trim() && selectedMap ? 'var(--t-accent)' : 'var(--t-border)', color: '#fff' }}>
                     追加
                   </button>
                 </div>
@@ -978,13 +1112,54 @@ export function MapTab({ namespace, apiUrl }: Props) {
           <button
             onClick={() => setMapLocked(v => !v)}
             style={{ position: 'absolute', top: 8, right: 8, zIndex: 5, padding: '4px 12px', borderRadius: 8, border: 'none', cursor: 'pointer', fontSize: 13,
-              background: mapLocked ? '#ff6600' : 'rgba(0,0,0,0.45)', color: '#fff' }}>
+              background: mapLocked ? 'var(--t-accent)' : 'rgba(0,0,0,0.45)', color: '#fff' }}>
             {mapLocked ? '🔒 ロック中' : '🔓 ロック'}
           </button>
         )}
         {robotPose && mapImg && (
           <div style={{ position: 'absolute', bottom: 8, left: 8, background: 'rgba(0,0,0,0.6)', color: '#00ff88', padding: '3px 8px', borderRadius: 8, fontSize: 11, zIndex: 5 }}>
             🤖 ({robotPose.x.toFixed(2)}, {robotPose.y.toFixed(2)}) {(robotPose.yaw * 180 / Math.PI).toFixed(1)}°
+          </div>
+        )}
+
+        {/* Google Maps風: 右下にズーム+/-と現在地ボタン、縮尺バー */}
+        {mapImg && (
+          <div style={{ position: 'absolute', bottom: 8, right: 8, zIndex: 6, display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 8 }}>
+            <button
+              onClick={recenterOnRobot}
+              disabled={!robotPose}
+              title="現在地に戻る"
+              style={{
+                width: 46, height: 46, borderRadius: '50%', border: '1px solid #fff',
+                cursor: robotPose ? 'pointer' : 'not-allowed',
+                background: 'rgba(0,0,0,0.6)', color: robotPose ? '#00ff88' : '#666',
+                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                boxShadow: '0 1px 4px rgba(0,0,0,0.4)',
+              }}
+            >
+              <Icon name="my_location" size={24} />
+            </button>
+            <div style={{ display: 'flex', flexDirection: 'column', borderRadius: 12, overflow: 'hidden', background: 'rgba(0,0,0,0.6)', border: '1px solid #fff', boxShadow: '0 1px 4px rgba(0,0,0,0.4)' }}>
+              <button
+                onClick={() => zoomBy(ZOOM_BUTTON_FACTOR)}
+                title="ズームイン"
+                style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="add" size={22} /></button>
+              <div style={{ height: 1, background: 'rgba(255,255,255,0.35)' }} />
+              <button
+                onClick={() => zoomBy(1 / ZOOM_BUTTON_FACTOR)}
+                title="ズームアウト"
+                style={{ width: 46, height: 40, border: 'none', cursor: 'pointer', background: 'transparent', color: '#fff', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+              ><Icon name="remove" size={22} /></button>
+            </div>
+            {scaleBar && (
+              <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 2 }}>
+                <span style={{ fontSize: 10, color: '#fff', background: 'rgba(0,0,0,0.55)', padding: '1px 6px', borderRadius: 6 }}>
+                  {scaleBar.meters >= 1 ? `${scaleBar.meters} m` : `${scaleBar.meters * 100} cm`}
+                </span>
+                <div style={{ width: Math.max(4, scaleBar.px), height: 3, background: '#fff', borderRadius: 2, boxShadow: '0 0 0 1px rgba(0,0,0,0.5)' }} />
+              </div>
+            )}
           </div>
         )}
         {!mapImg && (
@@ -1000,6 +1175,7 @@ export function MapTab({ namespace, apiUrl }: Props) {
           />
         </div>
         <canvas ref={keepoutCanvasRef} style={{ display: 'none' }} />
+        <canvas ref={mapCanvasRef} style={{ display: 'none' }} />
       </div>
 
       {/* 右パネル */}
@@ -1069,6 +1245,23 @@ export function MapTab({ namespace, apiUrl }: Props) {
             {rooms.length === 0 && <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>なし</div>}
           </div>
         </div>
+
+        {/* 他機に共有(右下) */}
+        {fleetRobotNames.length > 0 && (
+          <div style={cardStyle}>
+            <SectionTitle>他機に共有</SectionTitle>
+            <select value={shareTarget} onChange={e => setShareTarget(e.target.value)}
+              style={{ padding: '5px 8px', borderRadius: 8, border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)', fontSize: 12, marginBottom: 6, width: '100%' }}>
+              <option value="">-- 送信先を選択 --</option>
+              {fleetRobotNames.map(n => <option key={n} value={n}>{n}</option>)}
+            </select>
+            <button onClick={shareMap} disabled={sharing || !selectedMap || !shareTarget}
+              style={{ ...btnStyle(), background: sharing ? 'var(--t-border)' : 'var(--t-accent)', color: '#fff', width: '100%',
+                opacity: (!selectedMap || !shareTarget) ? 0.5 : 1 }}>
+              {sharing ? '送信中...' : `📤 ${selectedMap || '(マップ未選択)'} を送る`}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   );

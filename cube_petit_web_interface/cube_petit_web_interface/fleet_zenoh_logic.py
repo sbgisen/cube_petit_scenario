@@ -25,9 +25,11 @@ parsing, JSON decoding, and snapshot building.
 Zenoh key convention this module reads (fixed by cube_petit_fleet_bridge, do
 not change -- see its fleet_bridge_logic.py docstring for the full picture):
 
-    robots/<robot_name>/pose         (pub)  {"x","y","yaw"}
-    robots/<robot_name>/battery      (pub)  float in [0, 1]
-    robots/<robot_name>/map_name     (pub)  JSON string
+    robots/<robot_name>/pose            (pub)  {"x","y","yaw"}
+    robots/<robot_name>/battery         (pub)  float in [0, 1]
+    robots/<robot_name>/map_name        (pub)  JSON string
+    robots/<robot_name>/bringup_active  (pub)  JSON boolean
+    robots/<robot_name>/nav_active      (pub)  JSON boolean
 """
 
 from __future__ import annotations
@@ -35,10 +37,13 @@ from __future__ import annotations
 import json
 import typing
 
-#: The three read-only state fields the Tier 2 picker subscribes to
-#: (deliberately excludes `command` / `command_is_completed`: sending commands
-#: to other robots is out of scope for this read-only fleet visibility feature).
-FIELDS: typing.Tuple[str, ...] = ('pose', 'battery', 'map_name')
+#: The read-only state fields the Tier 2 picker subscribes to (deliberately
+#: excludes `command` / `command_is_completed`: sending commands to other
+#: robots is out of scope for this read-only fleet visibility feature).
+#: `bringup_active` / `nav_active` were added alongside cube_petit_ros's
+#: zenoh_connector.py commit d2dc84e, so older robots may not publish them
+#: yet -- build_snapshot() reports `None` for those until the first publish.
+FIELDS: typing.Tuple[str, ...] = ('pose', 'battery', 'map_name', 'bringup_active', 'nav_active')
 
 #: A robot is considered offline once its last state publish is older than
 #: this many seconds. fleet_bridge's own `state_publish_period_sec` default is
@@ -64,14 +69,17 @@ def parse_robot_name(key_expr: str, field: str) -> typing.Optional[str]:
     return None
 
 
-def decode_field(payload: typing.Union[bytes, bytearray, str]) -> typing.Union[dict, float, str]:
-    """Decode a ``pose`` / ``battery`` / ``map_name`` zenoh payload (all JSON).
+def decode_field(payload: typing.Union[bytes, bytearray, str]) -> typing.Union[dict, float, str, bool]:
+    """Decode a per-field zenoh payload (all JSON, one value per `FIELDS` entry).
 
     Args:
         payload: Raw zenoh payload, as ``bytes``/``bytearray`` or ``str``.
 
     Returns:
-        The decoded JSON value (dict for pose, float for battery, str for map_name).
+        The decoded JSON value: dict for pose, float for battery, str for
+        map_name, bool for bringup_active/nav_active. `json.loads` already
+        returns the right Python type for each (including bool for
+        `true`/`false`), so no per-field branching is needed here.
 
     Raises:
         ValueError: If the payload is not valid JSON.
@@ -86,14 +94,20 @@ def build_snapshot(state: typing.Dict[str, dict],
     """Build the JSON-serializable ``/fleet/robots`` payload from raw per-robot state.
 
     Args:
-        state: ``{robot_name: {"pose": ..., "battery": ..., "map_name": ..., "last_seen": monotonic_time}}``,
+        state: ``{robot_name: {"pose": ..., "battery": ..., "map_name": ...,
+            "bringup_active": ..., "nav_active": ..., "last_seen": monotonic_time}}``,
             as accumulated by FleetZenohWatcher._on_sample. Missing fields are
-            simply absent from a robot's dict (e.g. before its first publish).
+            simply absent from a robot's dict (e.g. before its first publish,
+            or a robot running an older zenoh_connector.py that doesn't
+            publish `bringup_active`/`nav_active` yet).
         now: Current `time.monotonic()` reading (passed in for testability).
         stale_after: Seconds since `last_seen` after which a robot is `online: False`.
 
     Returns:
-        ``{robot_name: {pose, battery, map_name, online, last_seen_sec_ago}}``.
+        ``{robot_name: {pose, battery, map_name, bringup_active, nav_active,
+        online, last_seen_sec_ago}}``. `bringup_active`/`nav_active` are
+        `None` (not `False`) when not yet known, distinct from an explicit
+        `False` reported by the robot.
     """
     result = {}
     for name, robot in state.items():
@@ -103,6 +117,8 @@ def build_snapshot(state: typing.Dict[str, dict],
             'pose': robot.get('pose'),
             'battery': robot.get('battery'),
             'map_name': robot.get('map_name'),
+            'bringup_active': robot.get('bringup_active'),
+            'nav_active': robot.get('nav_active'),
             'online': age < stale_after,
             'last_seen_sec_ago': round(age, 1),
         }

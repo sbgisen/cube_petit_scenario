@@ -5,11 +5,28 @@ import { MapView3D } from './MapView3D';
 import { Joystick } from './Joystick';
 import { CameraView } from './CameraView';
 import { QuickPhraseGrid } from './QuickPhraseGrid';
+import { Icon } from './Icon';
 import { useRosPublisher, useRosTopic } from '../hooks/useRosTopic';
 import { useRosAction } from '../hooks/useRosAction';
 import { useRosService } from '../hooks/useRosService';
 import { useSpeechServerAlive } from '../hooks/useRosNodeAlive';
 import type { LayerVisibility } from '../types/ros';
+
+type RunMode = 'stopped' | 'map_creation' | 'autonomous' | 'manual';
+
+const RUN_MODE_INFO: Record<RunMode, { label: string; color: string; icon: string }> = {
+  stopped:      { label: '未起動',         color: '#777777', icon: 'power_off' },
+  map_creation: { label: 'マップ作成モード', color: '#e6c200', icon: 'edit_location_alt' },
+  autonomous:   { label: '自律移動モード',   color: '#00cc66', icon: 'smart_toy' },
+  manual:       { label: '手動操作モード',   color: '#0088ff', icon: 'sports_esports' },
+};
+
+function deriveRunMode(status: Record<string, boolean> | null): RunMode {
+  if (!status?.bringup) return 'stopped';
+  if (status.create_map) return 'map_creation';
+  if (status.navigation) return 'autonomous';
+  return 'manual';
+}
 
 interface Props {
   ros: ROSLIB.Ros | null;
@@ -31,8 +48,8 @@ const LAYER_LABELS: { key: keyof LayerVisibility; label: string }[] = [
 
 export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhrases }: Props) {
   const [layers, setLayers] = useState<LayerVisibility>({
-    // lidar/camera: rosbridge越しの購読は重いため、デフォルトOFF(レイヤーボタンでONにした時だけ購読)
-    lidar: false, map: true, costmap: true, plan: true, people: true, doa: true, camera: false,
+    // lidar/camera/costmap: rosbridge越しの購読が重いため、デフォルトOFF(レイヤーボタンでONにした時だけ購読)
+    lidar: false, map: true, costmap: false, plan: true, people: true, doa: true, camera: false,
   });
   const [is3D, setIs3D] = useState(false);
   const [mapMode, setMapMode] = useState<MapMode>('view');
@@ -73,6 +90,22 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
   const handleSetMapMode = (m: MapMode) => {
     setMapMode(m);
     if (m === 'goal' || m === 'initialpose') setIs3D(false);
+  };
+
+  // マップ作成モード中のみ有効。create_mapを再起動してSLAM地図を作り直す
+  // (slam_toolboxのオンラインモードには汎用のclear serviceがないため、
+  // 既存のlaunch stop/startを使うのが最も確実)
+  const [clearingMap, setClearingMap] = useState(false);
+  const handleClearMap = async () => {
+    if (!confirm('地図をクリアして最初から作り直しますか？(作成中の地図は失われます)')) return;
+    setClearingMap(true);
+    try {
+      await fetch(`${apiUrl}/launch/create_map/stop`, { method: 'POST' });
+      await new Promise(r => setTimeout(r, 1500));
+      await fetch(`${apiUrl}/launch/create_map/start`, { method: 'POST' });
+    } finally {
+      setClearingMap(false);
+    }
   };
   const [mapSize, setMapSize] = useState<{ w: number; h: number }>({ w: 400, h: 400 });
 
@@ -149,6 +182,33 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
   const toggleLayer = (key: keyof LayerVisibility) =>
     setLayers((prev) => ({ ...prev, [key]: !prev[key] }));
 
+  // 現在のモード(マップ作成/自律移動/手動操作)表示用。/launch/status の
+  // create_map・navigation・bringup の起動状況から導出する
+  const [launchStatus, setLaunchStatus] = useState<Record<string, boolean> | null>(null);
+  useEffect(() => {
+    const poll = () => fetch(`${apiUrl}/launch/status`).then(r => r.json()).then(setLaunchStatus).catch(() => {});
+    poll();
+    const t = setInterval(poll, 3000);
+    return () => clearInterval(t);
+  }, [apiUrl]);
+  const runMode = deriveRunMode(launchStatus);
+  const runModeInfo = RUN_MODE_INFO[runMode];
+  // 目標/初期(goal_pose・initialposeの送信)はナビゲーションかSLAMが動いていないと
+  // 意味を成さないため、マップ作成/自律移動モードのときだけ押せるようにする
+  const canSetNavGoals = runMode === 'map_creation' || runMode === 'autonomous';
+
+  // これらのモードに入った瞬間、地図フレーム(mapTF)をデフォルトにする(以後の
+  // 手動選択は維持し、モードが変わるまで上書きしない)
+  useEffect(() => {
+    if (canSetNavGoals) {
+      setMapFrame('map');
+    } else {
+      // マップ作成/自律移動モードから外れたら、目標/初期モードのままにしない
+      setMapMode(m => (m === 'goal' || m === 'initialpose') ? 'view' : m);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runMode]);
+
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflow: 'hidden', position: 'relative' }}>
       {/* 全幅コントロール行 */}
@@ -156,7 +216,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         {LAYER_LABELS.map(({ key, label }) => (
           <button key={key} onClick={() => toggleLayer(key)} style={{
             padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
-            background: layers[key] ? '#ff6600' : 'var(--t-border)', color: 'var(--t-text)', fontSize: 13,
+            background: layers[key] ? 'var(--t-accent)' : 'var(--t-border)', color: 'var(--t-text)', fontSize: 13,
           }}>
             {label}
           </button>
@@ -170,7 +230,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
           </button>
           {showPOI && poiMaps.length > 0 && (
             <select value={poiMap} onChange={e => setPoiMap(e.target.value)}
-              style={{ padding: '4px 4px', fontSize: 12, background: '#333', color: 'var(--t-text)', border: 'none', borderLeft: '1px solid #555', maxWidth: 110, cursor: 'pointer' }}>
+              style={{ padding: '4px 4px', fontSize: 12, background: '#333', color: '#fff', border: 'none', borderLeft: '1px solid #555', maxWidth: 110, cursor: 'pointer' }}>
               {poiMaps.map(m => <option key={m} value={m}>{m}</option>)}
             </select>
           )}
@@ -178,14 +238,20 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         <div style={{ display: 'flex', gap: 6 }}>
           {/* 操作/目標モード */}
           <div style={{ display: 'flex', background: '#222', borderRadius: 20, overflow: 'hidden' }}>
-            {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期']] as [MapMode, string][]).map(([m, label]) => (
-              <button key={m} onClick={() => handleSetMapMode(m)} style={{
-                padding: '6px 14px', border: 'none', cursor: 'pointer', fontSize: 13,
-                background: mapMode === m ? '#0088ff' : 'transparent', color: 'var(--t-text)',
-              }}>
-                {label}
-              </button>
-            ))}
+            {([['view', '🔄 操作'], ['goal', '📍 目標'], ['initialpose', '📌 初期']] as [MapMode, string][]).map(([m, label]) => {
+              const disabled = m !== 'view' && !canSetNavGoals;
+              return (
+                <button key={m} onClick={() => !disabled && handleSetMapMode(m)} disabled={disabled} title={
+                  disabled ? 'マップ作成/自律移動モードのときだけ使えます' : undefined
+                } style={{
+                  padding: '6px 14px', border: 'none', fontSize: 13,
+                  cursor: disabled ? 'not-allowed' : 'pointer',
+                  background: mapMode === m ? '#0088ff' : 'transparent', color: disabled ? '#777' : '#fff',
+                }}>
+                  {label}
+                </button>
+              );
+            })}
           </div>
           {/* 2D/3D */}
           <div style={{ display: 'flex', background: '#222', borderRadius: 20, overflow: 'hidden' }}>
@@ -196,7 +262,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
                   padding: '6px 14px', border: 'none', fontSize: 13,
                   cursor: disabled ? 'not-allowed' : 'pointer',
                   background: (is3D ? '3D' : '2D') === m ? '#555' : 'transparent',
-                  color: disabled ? '#555' : 'var(--t-text)',
+                  color: disabled ? '#777' : '#fff',
                 }}>
                   {m}
                 </button>
@@ -210,13 +276,35 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
                 <button key={f} onClick={() => setMapFrame(f)} style={{
                   padding: '6px 12px', border: 'none', fontSize: 12, cursor: 'pointer',
                   background: mapFrame === f ? '#336633' : 'transparent',
-                  color: 'var(--t-text)',
+                  color: '#fff',
                 }}>
                   {f === 'base_link' ? 'base' : f}
                 </button>
               ))}
             </div>
           )}
+        </div>
+
+        {/* マップ作成モード中のみ: 地図クリア(作り直し) */}
+        {runMode === 'map_creation' && (
+          <button onClick={handleClearMap} disabled={clearingMap}
+            title="SLAM地図を破棄してcreate_mapを再起動します" style={{
+              padding: '6px 14px', borderRadius: 20, border: 'none', fontSize: 13, flexShrink: 0,
+              cursor: clearingMap ? 'not-allowed' : 'pointer',
+              background: '#663333', color: '#fff', opacity: clearingMap ? 0.6 : 1,
+            }}>
+            🗑️ {clearingMap ? 'クリア中…' : '地図クリア'}
+          </button>
+        )}
+
+        {/* 現在のモード表示(マップ作成/自律移動/手動操作/未起動) */}
+        <div title="rosbridge/launch/statusのcreate_map・navigation・bringupから判定" style={{
+          display: 'flex', alignItems: 'center', gap: 6, padding: '6px 14px', borderRadius: 20,
+          background: `${runModeInfo.color}22`, color: runModeInfo.color, fontSize: 13,
+          marginLeft: 'auto', flexShrink: 0,
+        }}>
+          <Icon name={runModeInfo.icon} size={16} />
+          {runModeInfo.label}
         </div>
       </div>
 
@@ -227,7 +315,7 @@ export function OperationTab({ ros, namespace, apiUrl, quickPhrases, setQuickPhr
         {/* 左: マップ */}
         <div ref={mapContainerRef} style={{ flex: 3, minWidth: 0, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
           {is3D
-            ? <MapView3D ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} />
+            ? <MapView3D ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} places={showPOI ? places : undefined} rooms={showPOI ? rooms : undefined} />
             : <MapView   ros={ros} namespace={namespace} layers={layers} width={mapSize.w} height={mapSize.h} mode={mapMode} frame={mapFrame} onGoal={handleGoal} onInitialPose={handleInitialPose} places={showPOI ? places : undefined} rooms={showPOI ? rooms : undefined} />
           }
           {/* ナビゲーションステータスオーバーレイ */}

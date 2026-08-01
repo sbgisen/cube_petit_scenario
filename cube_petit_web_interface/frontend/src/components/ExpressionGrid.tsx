@@ -58,12 +58,12 @@ export function ExpressionGrid({ ros, namespace }: Props) {
             onClick={() => handleTap(name)}
             style={{
               ...btnBase,
-              borderColor: active ? '#ff6600' : 'transparent',
+              borderColor: active ? 'var(--t-accent)' : 'transparent',
             }}
-            onMouseDown={(e) => (e.currentTarget.style.background = '#ff6600')}
+            onMouseDown={(e) => (e.currentTarget.style.background = 'var(--t-accent)')}
             onMouseUp={(e) => (e.currentTarget.style.background = 'var(--t-surface2)')}
             onMouseLeave={(e) => (e.currentTarget.style.background = 'var(--t-surface2)')}
-            onTouchStart={(e) => (e.currentTarget.style.background = '#ff6600')}
+            onTouchStart={(e) => (e.currentTarget.style.background = 'var(--t-accent)')}
             onTouchEnd={(e) => (e.currentTarget.style.background = 'var(--t-surface2)')}
           >
             <span style={{ fontSize: 20 }}>{emoji}</span>

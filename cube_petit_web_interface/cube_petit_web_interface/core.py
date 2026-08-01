@@ -61,10 +61,14 @@ async def get_node_list_output() -> str:
     async with _node_list_lock:
         if time.monotonic() - _node_list_cache[0] < NODE_LIST_TTL:
             return _node_list_cache[1]
+        # ROS_AUTOMATIC_DISCOVERY_RANGE=SUBNET だと同じサブネット上の他機のノードも
+        # 探索対象になり、機体が増える/ネットワークが混むと`ros2 node list`自体が
+        # 5秒では終わらないことがある(yellowで実際に5秒超で"bringup: false"の
+        # 誤判定を引き起こした。プロセス自体はCPUを使って動いており固まってはいない)。
         result = await asyncio.to_thread(subprocess.run, ['ros2', 'node', 'list'],
                                          capture_output=True,
                                          text=True,
-                                         timeout=5,
+                                         timeout=15,
                                          env=ROS_ENV)
         _node_list_cache = (time.monotonic(), result.stdout)
         return result.stdout
@@ -110,6 +114,7 @@ processes: dict[str, Optional[subprocess.Popen]] = {
     'anima': None,
     'create_map': None,
     'navigation': None,
+    'shared_controller_hub': None,
 }
 
 LAUNCH_COMMANDS = {
@@ -131,8 +136,22 @@ LAUNCH_COMMANDS = {
          'share/cube_petit_chat/config/gpt_tools/infer_object/infer_object.txt'),
     ],
     'anima': ['ros2', 'launch', 'cube_petit_anima', 'anima.launch.py'],
-    'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map_orange.launch.py'],
-    'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation_orange.launch.py'],
+    # create_map.launch.py / navigation.launch.py は自身のhostnameからrobot名前空間を
+    # 自動導出する(cube_petit_ros側、2026-07-27)。以前は機体別の薄いラッパー
+    # (create_map_orange.launch.py等)を機体色で動的に選んでいたが、hostname自動導出に
+    # 一本化してラッパーファイル自体を廃止した。
+    # create_map.launch.py / navigation.launch.py auto-derive their robot namespace from
+    # hostname (see cube_petit_ros, 2026-07-27); the per-robot wrapper launch files this
+    # used to select dynamically (create_map_orange.launch.py, etc.) have been removed.
+    'create_map': ['ros2', 'launch', 'cube_petit_navigation', 'create_map.launch.py'],
+    'navigation': ['ros2', 'launch', 'cube_petit_navigation', 'navigation.launch.py'],
+    # 1台のPS4/PS5コントローラを複数ロボットで使い回す仕組み(共有コントローラ)の
+    # hub役。物理接続したこの機体からのコントローラ入力を他機(receiver役、bringupに
+    # 統合済みで常時起動中)へ配信する。role/robot_names/toggle_buttonsはstart_launch内で
+    # 動的に付与する(navigationのmap:=/keepout:=と同じパターン)。
+    # ベースコマンドの末尾(launch file名)は _kill_by_launch_file の検索キーに
+    # 使われるため変更しないこと。
+    'shared_controller_hub': ['ros2', 'launch', 'cube_petit_shared_controller', 'shared_controller.launch.py'],
 }
 
 # 各launchが起動中かを判定するノード名（部分一致）
@@ -143,7 +162,30 @@ LAUNCH_NODE_MARKERS = {
     'anima': 'behavior_node',
     'create_map': 'slam_toolbox',
     'navigation': 'emcl',
+    'shared_controller_hub': 'controller_hub_node',
 }
+
+
+async def get_launch_status() -> dict:
+    """各launchターゲットが実際に起動中かを返す.
+
+    自プロセス管理下か、systemdサービス等の外部起動かを問わない。
+    `/launch/status` と `start_launch` の「既に起動中か」判定を共通化するために切り出した。
+    以前は `start_launch` が `processes[target]` （このAPIサーバー自身が起動したものだけ）
+    しか見ておらず、systemd の `cube-petit-bringup.service` 等で外部起動されている状態を
+    検知できずに二重起動してしまうバグがあった（同名ノードの重複でロボットが不安定になる）。
+    """
+    try:
+        node_output = await get_node_list_output()
+        own_ns_prefix = f'/{DEFAULT_NAMESPACE}/'
+        own_nodes = [line for line in node_output.splitlines() if line.startswith(own_ns_prefix)]
+        status = {}
+        for target, marker in LAUNCH_NODE_MARKERS.items():
+            proc_alive = processes[target] is not None and processes[target].poll() is None
+            status[target] = proc_alive or any(marker in line for line in own_nodes)
+        return status
+    except Exception:
+        return {target: proc is not None and proc.poll() is None for target, proc in processes.items()}
 
 
 def get_node() -> Optional['Node']:
@@ -220,6 +262,43 @@ def get_fleet_state() -> dict:
 def get_fleet_error() -> Optional[str]:
     """フリート監視が使えない理由（正常なら None）."""
     return _fleet_error
+
+
+def send_fleet_command(robot_name: str, method: str, args: dict) -> str:
+    """フリート内の(自分以外でもよい)ロボットへコマンドを送る（例: move_to_pose）.
+
+    Raises:
+        RuntimeError: フリート監視(zenoh)が起動していない場合。
+    """
+    if _fleet_watcher is None:
+        raise RuntimeError('Fleet zenoh watcher is not running (Tier 2 unavailable)')
+    return _fleet_watcher.send_command(robot_name, method, args)
+
+
+def start_fleet_chase(chaser: str, target: str) -> str:
+    """追いかけっこペアを開始する(このAPIサーバープロセス内の常駐ループで実行される).
+
+    Raises:
+        RuntimeError: フリート監視(zenoh)が起動していない場合。
+        ValueError: chaser == target の場合。
+    """
+    if _fleet_watcher is None:
+        raise RuntimeError('Fleet zenoh watcher is not running (Tier 2 unavailable)')
+    return _fleet_watcher.start_chase(chaser, target)
+
+
+def stop_fleet_chase(pair_id: str) -> bool:
+    """追いかけっこペアを停止する。存在しなければFalse."""
+    if _fleet_watcher is None:
+        return False
+    return _fleet_watcher.stop_chase(pair_id)
+
+
+def list_fleet_chase() -> list:
+    """現在アクティブな追いかけっこペア一覧を返す."""
+    if _fleet_watcher is None:
+        return []
+    return _fleet_watcher.list_chase()
 
 
 @asynccontextmanager

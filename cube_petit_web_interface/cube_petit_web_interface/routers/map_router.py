@@ -13,6 +13,7 @@
 # limitations under the License.
 """マップ管理 API (/map/*) — マップ一覧・画像・places/rooms・保存・回転・初期位置."""
 
+import asyncio
 import base64
 import io
 import math
@@ -21,12 +22,14 @@ import shutil
 import subprocess
 import tempfile
 from typing import Optional
+import zipfile
 
 from fastapi import APIRouter
 from fastapi import HTTPException
 from fastapi.responses import Response
 from PIL import Image
 from pydantic import BaseModel
+import requests
 import yaml
 
 try:
@@ -193,6 +196,30 @@ async def save_keepout(body: KeepoutSaveBody) -> dict:
     return {'ok': True}
 
 
+class MapBaseSaveBody(BaseModel):
+    map_name: str
+    png_base64: str
+
+
+@router.post('/map/base/save')
+async def save_map_base(body: MapBaseSaveBody) -> dict:
+    """地図本体(occupancy grid)を上書き保存する.
+
+    keepoutと違いナビゲーションが実際に使う地図ファイルそのものを書き換えるため、
+    上書き前に一世代分のバックアップ(map.pgm.bak)を残す(誤って消しすぎた場合の救済用)。
+    """
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    png_data = base64.b64decode(body.png_base64)
+    img = Image.open(io.BytesIO(png_data)).convert('L')
+    pgm_path = d / 'map.pgm'
+    if pgm_path.exists():
+        shutil.copyfile(pgm_path, d / 'map.pgm.bak')
+    pgm_path.write_bytes(core.helpers.pil_to_pgm_bytes(img))
+    return {'ok': True}
+
+
 class MapSaveBody(BaseModel):
     map_name: str
     dest: str = 'extra'  # 'extra' = /home/cube-petit/map, 'base' = nav pkg map dir
@@ -257,6 +284,23 @@ async def save_map(body: MapSaveBody) -> dict:
     except Exception as e:
         return {'ok': False, 'error': str(e)}
 
+    # slam_toolboxのポーズグラフも一緒に保存しておく(あとで「続きから」再開するため)。
+    # PGM/YAMLと違い、これはSLAM実行中(create_map起動中)でないと取得できないので、
+    # SLAM停止後の保存時は静かに失敗させる(map/saveの主目的である画像保存は成功させたい)。
+    try:
+        subprocess.run(
+            [
+                'ros2', 'service', 'call', f'/{core.DEFAULT_NAMESPACE}/navigation/slam_toolbox/serialize_map',
+                'slam_toolbox/srv/SerializePoseGraph', f"{{filename: '{dest_stem}'}}"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=10,
+            env=core.ROS_ENV,
+        )
+    except Exception:
+        pass
+
     # auto-generate keepout copy
     pgm_src = dest_dir / 'map.pgm'
     pgm_kp = dest_dir / 'map_keepout.pgm'
@@ -271,6 +315,46 @@ async def save_map(body: MapSaveBody) -> dict:
         with yaml_kp.open('w') as f:
             yaml.safe_dump(meta, f, sort_keys=False)
     return {'ok': True, 'dir': str(dest_dir)}
+
+
+class SlamContinueBody(BaseModel):
+    map_name: str
+
+
+@router.post('/map/slam/continue')
+async def continue_slam_map(body: SlamContinueBody) -> dict:
+    """既存マップの保存済みポーズグラフを読み込み、そこから続きをマッピングする.
+
+    create_map起動(SLAM)中に呼ぶこと。map/saveで一緒に保存されたポーズグラフ
+    (map/saveと同じstem)をdeserialize_mapで読み込む。ポーズグラフが無い
+    (map/save以前に作られた古いマップ等)場合はslam_toolbox側がエラーを返す。
+    START_AT_FIRST_NODE(match_type=1)で、ロボットの現在位置合わせは行わず
+    グラフの最初のノード基準で復元する(スキャンマッチングで自然に合っていく)。
+    """
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    stem = str(d / 'map')
+    try:
+        result = subprocess.run(
+            [
+                'ros2', 'service', 'call', f'/{core.DEFAULT_NAMESPACE}/navigation/slam_toolbox/deserialize_map',
+                'slam_toolbox/srv/DeserializePoseGraph',
+                f"{{filename: '{stem}', match_type: 1, initial_pose: {{x: 0.0, y: 0.0, theta: 0.0}}}}"
+            ],
+            capture_output=True,
+            text=True,
+            timeout=15,
+            env=core.ROS_ENV,
+        )
+        ok = 'result: 0' in result.stdout or result.returncode == 0
+        if not ok:
+            return {'ok': False, 'message': result.stderr.strip() or result.stdout.strip() or 'deserialize failed'}
+        return {'ok': True, 'message': f'{body.map_name}の続きから再開しました'}
+    except subprocess.TimeoutExpired:
+        return {'ok': False, 'message': 'timeout'}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
 
 
 class RotateBody(BaseModel):
@@ -400,3 +484,62 @@ async def rename_map_room(map_name: str, old_name: str, new_name: str) -> dict:
             break
     _save_map_rooms(map_name, rooms)
     return {'ok': True}
+
+
+# --- 機体間でのマップ共有 (/map/share は送信元、/map/receive は受信側) ---
+
+
+def _zip_map_dir(d: Path) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, 'w', zipfile.ZIP_DEFLATED) as zf:
+        for f in d.iterdir():
+            if f.is_file():
+                zf.write(f, arcname=f.name)
+    return buf.getvalue()
+
+
+class MapShareBody(BaseModel):
+    map_name: str
+    target_host: str  # 例: 'cube-petit-yellow.local'
+
+
+@router.post('/map/share')
+async def share_map(body: MapShareBody) -> dict:
+    """このロボットにあるマップ一式を、他ロボットのweb_interfaceへHTTPで送る.
+
+    zip化してbase64で/map/receiveにPOSTするだけのシンプルな実装(zenohの
+    フリート網はpose/battery等の小さいメッセージ用途のため、7MB前後になる
+    ポーズグラフを含むマップ転送には素直にHTTP経由にした)。
+    """
+    d = _find_map_dir(body.map_name)
+    if d is None:
+        raise HTTPException(404, 'Map not found')
+    zip_bytes = _zip_map_dir(d)
+    payload = {'map_name': body.map_name, 'zip_base64': base64.b64encode(zip_bytes).decode()}
+    try:
+        resp = await asyncio.to_thread(requests.post,
+                                       f'http://{body.target_host}:8000/map/receive',
+                                       json=payload,
+                                       timeout=30)
+        if resp.status_code != 200:
+            return {'ok': False, 'message': f'{body.target_host}: HTTP {resp.status_code}'}
+        data = resp.json()
+        return {'ok': bool(data.get('ok')), 'message': data.get('message', '')}
+    except Exception as e:
+        return {'ok': False, 'message': str(e)}
+
+
+class MapReceiveBody(BaseModel):
+    map_name: str
+    zip_base64: str
+
+
+@router.post('/map/receive')
+async def receive_map(body: MapReceiveBody) -> dict:
+    """他ロボットから送られてきたマップ一式を保存する(/map/shareの受信側)."""
+    dest_dir = core.MAP_EXTRA_DIR / body.map_name
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    zip_bytes = base64.b64decode(body.zip_base64)
+    with zipfile.ZipFile(io.BytesIO(zip_bytes)) as zf:
+        zf.extractall(dest_dir)
+    return {'ok': True, 'message': f'{body.map_name}を受信しました'}
