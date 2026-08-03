@@ -69,8 +69,10 @@ DEFAULT_VENUE_CONTEXT: str = ('ここはROSCon JP 2026(2026年8月4日・5日、
                               '技術的な話も交えつつ、かわいらしく短い言葉で話してください。誇張したり、'
                               '実際にはできないことをできると言ったりしないでください。\n'
                               'セリフは音声合成でそのまま読み上げられるので、英字の固有名詞や略語は'
-                              'カタカナの読みで書いてください(例: ROSCon JP→ロスコンジェーピー、'
-                              'ROS 2→ロスツー、ROS→ロス、LiDAR→ライダー、LLM→エルエルエム)。')
+                              'カタカナの読みで書いてください。英字のまま書いてはいけません'
+                              '(例: ROSCon JP→ロスコンジェーピー、ROS 2 Jazzy→ロスツー ジャジー、'
+                              'ROS 2→ロスツー、ROS→ロス、Jazzy→ジャジー、LiDAR→ライダー、'
+                              'LLM→エルエルエム、CubePetit→キューブプチ)。')
 
 #: Facial expressions cube_petit_facial_animation actually supports (see
 #: frontend/src/components/ExpressionGrid.tsx's EXPRESSIONS list in this
