@@ -121,6 +121,17 @@ MAX_CONSECUTIVE_TURN_ERRORS = 3
 #: 失敗時のリトライ間隔(スタックした外部APIを連打しない)。
 TURN_RETRY_BACKOFF_SEC = 1.0
 
+#: Speaker-amp warm-up before the first real line. The robots' amps have a
+#: signal-detect standby that swallows the first ~1s of audio after idle, and
+#: digital silence padding cannot wake them (2026-08-03 booth finding; a
+#: continuous sub-audible keep-alive tone was audible on these small speakers
+#: and got rejected). So every run starts with a short throat-clear on all
+#: participants -- losing (part of) it is harmless and it keeps each robot's
+#: real first line intact. Turns then follow closely enough that the amps
+#: stay awake for the rest of the run.
+WARMUP_TEXT = 'こほんっ'
+WARMUP_WAIT_SEC = 2.0
+
 #: Default location of the setup wizard's per-robot personality.yaml files
 #: (see conversation_conductor_logic.personality_file_path).
 DEFAULT_PERSONALITY_BASE_DIR = Path.home() / '.cube_petit'
@@ -336,6 +347,7 @@ class ConversationConductor:
         with self._lock:
             self._state['script'] = script
 
+        self._warm_up_amps(participants)
         for i, turn in enumerate(script):
             if self._stop_event.is_set():
                 self._finish(stopped=True)
@@ -355,6 +367,7 @@ class ConversationConductor:
             self._finish(error=f'Personality loading failed: {error}')
             return
 
+        self._warm_up_amps(participants)
         consecutive_errors = 0
         while not self._stop_event.is_set():
             with self._lock:
@@ -422,6 +435,22 @@ class ConversationConductor:
         }
         with self._lock:
             self._state['log'].append(entry)
+
+    def _warm_up_amps(self, participants: typing.List[str]) -> None:
+        """Fire a short throat-clear on every participant to wake their amps.
+
+        Fire-and-forget (completion is not awaited; losing part of the warm-up
+        audio is the whole point) -- see WARMUP_TEXT above. Skipped instantly
+        when a stop was already requested.
+        """
+        if self._stop_event.is_set():
+            return
+        for name in participants:
+            try:
+                self._send_command(logic.full_robot_name(name), 'speak', {'text': WARMUP_TEXT})
+            except Exception:  # noqa: BLE001 - warm-up must never abort the run
+                continue
+        self._stop_event.wait(WARMUP_WAIT_SEC)
 
     def _speak_turn(self, index: int, turn: dict) -> None:
         full_name = logic.full_robot_name(turn['speaker'])
