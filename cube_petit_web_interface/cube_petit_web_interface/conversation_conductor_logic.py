@@ -132,6 +132,30 @@ MIN_SCRIPT_TURNS = 2
 MAX_SCRIPT_TURNS = 24
 MAX_TURN_TEXT_CHARS = 200
 
+# =================================================
+# 掛け合いモード (interactive): 1ターン1回LLM呼び出し + 人間発話の織り込み
+# =================================================
+
+#: 会話ログの中で人間の発話を表す speaker 値 (personalities / VALID robot names
+#: とは別の予約語)。conversation_conductor.py の submit_human_utterance() が
+#: この値でログに積む。
+HUMAN_SPEAKER = 'human'
+
+#: 1分制御(plans/conversation_demo_plan.md「1分制御」節): 45秒でプロンプトに
+#: 締め指示を注入し、60秒でLLMを介さず締めセリフを強制する。
+INTERACTIVE_SOFT_CLOSE_SEC = 45.0
+INTERACTIVE_HARD_CLOSE_SEC = 60.0
+
+#: 各ロボット発話後に人間の発話を待つ「間」のデフォルト長さ(2〜3秒、設定可能 --
+#: ConversationConductor.start() の human_window_sec で上書きできる)。
+DEFAULT_HUMAN_WINDOW_SEC = 2.5
+
+#: 人間発話(ASRテキスト)の長さ上限。ロボットのセリフよりやや長めに許容する。
+MAX_HUMAN_TEXT_CHARS = 300
+
+#: プロンプトに含める直近の会話履歴の件数上限(トークン節約・低レイテンシ優先)。
+HISTORY_PROMPT_MAX_ENTRIES = 12
+
 
 class ScriptError(ValueError):
     """The LLM's script response was missing, malformed, or failed validation."""
@@ -276,22 +300,66 @@ def parse_script_response(raw: typing.Union[str, list], participants: typing.Seq
         raise ScriptError(f'Script has {len(data)} turns, expected {MIN_SCRIPT_TURNS}-{MAX_SCRIPT_TURNS}')
 
     participant_set = set(participants)
-    turns: typing.List[dict] = []
-    for i, item in enumerate(data):
-        if not isinstance(item, dict):
-            raise ScriptError(f'Turn {i} is not a JSON object: {item!r}')
-        speaker = item.get('speaker')
-        if not isinstance(speaker, str) or speaker not in participant_set:
-            raise ScriptError(f'Turn {i} has speaker {speaker!r}, expected one of {sorted(participant_set)}')
-        text = item.get('text')
-        if not isinstance(text, str) or not text.strip():
-            raise ScriptError(f'Turn {i} is missing non-empty text: {item!r}')
-        text = text.strip()[:MAX_TURN_TEXT_CHARS]
-        face = item.get('face')
-        if not isinstance(face, str) or face not in VALID_FACES:
-            face = DEFAULT_FACE
-        turns.append({'speaker': speaker, 'text': text, 'face': face})
-    return turns
+    return [_normalize_turn_item(item, i, participant_set) for i, item in enumerate(data)]
+
+
+def _normalize_turn_item(item: object, index: int, participant_set: typing.Set[str]) -> dict:
+    """Validate/normalize one ``{"speaker", "text", "face"}`` turn object.
+
+    Shared by parse_script_response() (a whole array of these) and
+    parse_turn_response() (a single one, 掛け合いモード's per-turn LLM call).
+
+    Raises:
+        ScriptError: Same conditions as parse_script_response()'s per-turn checks.
+    """
+    if not isinstance(item, dict):
+        raise ScriptError(f'Turn {index} is not a JSON object: {item!r}')
+    speaker = item.get('speaker')
+    if not isinstance(speaker, str) or speaker not in participant_set:
+        raise ScriptError(f'Turn {index} has speaker {speaker!r}, expected one of {sorted(participant_set)}')
+    text = item.get('text')
+    if not isinstance(text, str) or not text.strip():
+        raise ScriptError(f'Turn {index} is missing non-empty text: {item!r}')
+    text = text.strip()[:MAX_TURN_TEXT_CHARS]
+    face = item.get('face')
+    if not isinstance(face, str) or face not in VALID_FACES:
+        face = DEFAULT_FACE
+    return {'speaker': speaker, 'text': text, 'face': face}
+
+
+def parse_turn_response(raw: typing.Union[str, dict, list], participants: typing.Sequence[str]) -> dict:
+    """Parse and validate a single turn from 掛け合いモード's per-turn LLM call.
+
+    Mirrors parse_script_response() but expects one JSON object (not an
+    array). Tolerates the LLM wrapping the object in a 1-element array
+    anyway (some models do this even when asked for a bare object).
+
+    Args:
+        raw: Raw JSON text, or an already-parsed dict/list.
+        participants: Robot short names allowed as `speaker`.
+
+    Returns:
+        ``{"speaker": str, "text": str, "face": str}``.
+
+    Raises:
+        ScriptError: If `raw` isn't valid JSON/an object, or the turn fails
+            the same checks as parse_script_response()'s per-item validation.
+    """
+    if isinstance(raw, str):
+        text = _strip_code_fence(raw)
+        try:
+            data = json.loads(text)
+        except (ValueError, TypeError) as error:
+            raise ScriptError(f'LLM response is not valid JSON: {error}') from None
+    else:
+        data = raw
+
+    if isinstance(data, list):
+        if not data:
+            raise ScriptError('Expected a JSON object, got an empty array')
+        data = data[0]
+
+    return _normalize_turn_item(data, 0, set(participants))
 
 
 def _strip_code_fence(text: str) -> str:
@@ -301,6 +369,164 @@ def _strip_code_fence(text: str) -> str:
         stripped = re.sub(r'^```[a-zA-Z]*\n?', '', stripped)
         stripped = re.sub(r'```\s*$', '', stripped)
     return stripped.strip()
+
+
+# =================================================
+# 掛け合いモード: 単ターンのプロンプト構築・人間発話の正規化・締め処理
+# =================================================
+
+
+def _speaker_label(short: str, personalities: typing.Dict[str, dict]) -> str:
+    """Human-readable label for a history line's speaker (nickname, or 来場者 for humans)."""
+    if short == HUMAN_SPEAKER:
+        return '来場者(人間)'
+    p = personalities.get(short, _GENERIC_FALLBACK_PERSONALITY)
+    return p.get('nick_name', short)
+
+
+def format_history_for_prompt(history: typing.Sequence[dict],
+                              personalities: typing.Dict[str, dict],
+                              max_entries: int = HISTORY_PROMPT_MAX_ENTRIES) -> str:
+    """Render recent ``{"speaker", "text", ...}`` log entries as ``label: text`` lines.
+
+    Args:
+        history: Conductor log entries so far (only `speaker`/`text` are
+            read; extra keys like `face`/`success` are ignored).
+        personalities: ``{short_name: personality_dict}`` for nickname lookup.
+        max_entries: Only the most recent this-many entries are included
+            (keeps the per-turn prompt small -- low latency is the point of
+            掛け合いモード's one-call-per-turn design).
+
+    Returns:
+        Newline-joined ``"label: text"`` lines, or a placeholder if `history`
+        has no entries with non-empty text yet.
+    """
+    lines = []
+    for entry in list(history)[-max_entries:]:
+        text = (entry.get('text') or '').strip()
+        if not text:
+            continue
+        label = _speaker_label(entry.get('speaker', ''), personalities)
+        lines.append(f'{label}: {text}')
+    return '\n'.join(lines) if lines else '(まだ発言はありません)'
+
+
+def build_turn_prompt(participants: typing.Sequence[str],
+                      personalities: typing.Dict[str, dict],
+                      history: typing.Sequence[dict],
+                      elapsed_sec: float,
+                      closing_hint: bool = False) -> str:
+    """Build the one-shot prompt asking the LLM for just the *next* turn.
+
+    Unlike build_script_prompt() (whole ~1 minute script in one call),
+    掛け合いモード calls the LLM once per turn so a human utterance captured
+    in `history` since the last turn can steer who speaks next (destination/
+    宛先 inference is entirely the LLM's job -- see the addressing instruction
+    below -- this module has no name-matching logic of its own).
+
+    Args:
+        participants: Robot short names taking part.
+        personalities: ``{short_name: personality_dict}``.
+        history: Conductor log so far (``{"speaker", "text", ...}``), human
+            turns included with `speaker` == HUMAN_SPEAKER.
+        elapsed_sec: Seconds since the conversation started (only used to
+            decide whether to mention `closing_hint` isn't already covering
+            it -- kept as an explicit arg so callers/tests don't need to
+            reconstruct timing).
+        closing_hint: If True, ask the LLM to start wrapping the
+            conversation up (see INTERACTIVE_SOFT_CLOSE_SEC).
+
+    Returns:
+        The full prompt text.
+    """
+    lines = [
+        'あなたは複数台のコミュニケーションロボット「キューブプチ」の会話進行役です。',
+        '来場者(人間)とロボットたちが掛け合う対話デモの、次の1ターン分だけを考えます。',
+        '各ロボットの性格設定:',
+    ]
+    for name in participants:
+        p = personalities.get(name, _GENERIC_FALLBACK_PERSONALITY)
+        friends = '、'.join(p.get('friends', []) or []) or '(記載なし)'
+        lines.append(f'- {name}({p.get("nick_name", name)}): 性格={p.get("personality", "")} / '
+                     f'一人称={p.get("first_person_pronoun", "")} / 好きなもの={p.get("favorite", "")} / '
+                     f'友達={friends}')
+    lines += [
+        '',
+        'これまでの会話:',
+        format_history_for_prompt(history, personalities),
+        '',
+        '次に話すロボットを1体選び、そのセリフを1〜2文の短い日本語で考えてください。',
+        '直前の発言(特に来場者の発言)で名前を呼びかけられていたら、呼ばれたロボットを次の話者にしてください。'
+        '呼びかけがなければ、まだあまり話していないロボットや自然な会話の流れを優先してください。',
+        '来場者に一方的に説明するのではなく、ロボット同士・来場者との掛け合いとして返してください。',
+    ]
+    if closing_hint:
+        lines.append('そろそろ会話を締めくくる時間です。来場者に向けた明るい一言を交えて、'
+                     '自然に締めに向かうセリフにしてください。')
+    lines += [
+        '出力は次のJSONオブジェクト1つだけを返してください(説明文やコードブロック記号は不要):',
+        '{"speaker": "<参加ロボットのnameのいずれか>", "text": "<セリフ>", '
+        f'"face": "<{"|".join(sorted(VALID_FACES))}のいずれか>"}}',
+    ]
+    return '\n'.join(lines)
+
+
+def normalize_human_utterance(raw_text: str) -> str:
+    """Trim/clip a raw ASR transcript for use as a history entry / prompt input.
+
+    Returns:
+        The stripped text (empty string if `raw_text` is empty/whitespace-only),
+        clipped to MAX_HUMAN_TEXT_CHARS.
+    """
+    if not isinstance(raw_text, str):
+        return ''
+    return raw_text.strip()[:MAX_HUMAN_TEXT_CHARS]
+
+
+def last_robot_speaker(history: typing.Sequence[dict], participants: typing.Sequence[str]) -> str:
+    """Return the most recent non-human speaker in `history`, or participants[0] if none yet."""
+    for entry in reversed(list(history)):
+        speaker = entry.get('speaker')
+        if speaker and speaker != HUMAN_SPEAKER and speaker in participants:
+            return speaker
+    return participants[0]
+
+
+#: Canned (LLM-free) closing lines used once INTERACTIVE_HARD_CLOSE_SEC is
+#: reached, so the demo has a guaranteed, low-latency way to end even if the
+#: LLM is slow/flaky right when the clock runs out (see
+#: build_forced_closing_turn() -- 1分制御の「60秒で締めのセリフを強制」).
+FORCED_CLOSING_TEMPLATES: typing.Tuple[str, ...] = (
+    'そろそろ時間だね、みんな聞いてくれてありがとう!またね!',
+    '今日はここまで!また遊びに来てね、ばいばーい!',
+)
+
+
+def build_forced_closing_turn(speaker: str, personalities: typing.Dict[str, dict]) -> dict:
+    """Build a deterministic (no LLM call) closing turn for `speaker`.
+
+    Args:
+        speaker: Short robot name to say the closing line (usually the last
+            robot to have spoken, see last_robot_speaker()).
+        personalities: ``{short_name: personality_dict}`` (unused today, kept
+            for symmetry/future personalization -- the line is generic on
+            purpose so it never fails validation).
+
+    Returns:
+        A single ``{"speaker", "text", "face"}`` turn.
+    """
+    text = FORCED_CLOSING_TEMPLATES[0]
+    return {'speaker': speaker, 'text': text, 'face': 'happy'}
+
+
+def should_inject_closing_hint(elapsed_sec: float) -> bool:
+    """Return True once elapsed_sec has crossed INTERACTIVE_SOFT_CLOSE_SEC (45s)."""
+    return elapsed_sec >= INTERACTIVE_SOFT_CLOSE_SEC
+
+
+def should_force_close(elapsed_sec: float) -> bool:
+    """Return True once elapsed_sec has crossed INTERACTIVE_HARD_CLOSE_SEC (60s)."""
+    return elapsed_sec >= INTERACTIVE_HARD_CLOSE_SEC
 
 
 # =================================================
@@ -346,14 +572,23 @@ def build_status_payload(state: dict) -> dict:
     """
     started_at = state.get('started_at')
     running = bool(state.get('running'))
+    mode = state.get('mode', 'script')
     now = state.get('now', time.monotonic())
     elapsed = round(now - started_at, 1) if running and started_at is not None else state.get('elapsed_sec', 0.0)
+    # 台本モードは開始時点で総ターン数が確定している(script配列の長さ)。掛け合い
+    # モードは1ターン1回LLM呼び出しで総数が事前に決まらないため、現在ターン数を
+    # そのまま「わかっている総数」として返す(フロントは進捗バーではなく経過秒/
+    # 締切秒で残り時間を見せる想定)。
+    if mode == 'script':
+        total_turns = len(state.get('script', []) or [])
+    else:
+        total_turns = state.get('current_turn', 0)
     return {
         'running': running,
-        'mode': state.get('mode', 'script'),
+        'mode': mode,
         'participants': list(state.get('participants', [])),
         'current_turn': state.get('current_turn', 0),
-        'total_turns': len(state.get('script', []) or []),
+        'total_turns': total_turns,
         'log': list(state.get('log', [])),
         'elapsed_sec': elapsed,
         'error': state.get('error', ''),

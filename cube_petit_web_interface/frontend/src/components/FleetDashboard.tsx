@@ -101,9 +101,13 @@ export function FleetDashboard({ apiUrl }: Props) {
   const [newChaser, setNewChaser] = useState('');
   const [newTarget, setNewTarget] = useState('');
 
-  // ---- 会話デモ(台本モード) ----
+  // ---- 会話デモ(台本モード/掛け合いモード) ----
   const [convoStatus, setConvoStatus] = useState<ConversationStatus | null>(null);
   const [convoParticipants, setConvoParticipants] = useState<string[]>([]);
+  // 'script'(台本): 開始時にLLM1回で丸ごと台本生成。'interactive'(掛け合い):
+  // 1ターン1回LLM呼び出し + orangeマイクのASRテキストを織り込む(バックエンドは
+  // conversation_conductor.py の _run_interactive)。
+  const [convoMode, setConvoMode] = useState<'script' | 'interactive'>('script');
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
@@ -537,7 +541,7 @@ export function FleetDashboard({ apiUrl }: Props) {
   const startConversation = async () => {
     const res = await fetch(`${apiUrl}/fleet/conversation/start`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participants: convoParticipants, mode: 'script' }),
+      body: JSON.stringify({ participants: convoParticipants, mode: convoMode }),
     }).then(r => r.json()).catch(() => ({ ok: false, error: '通信エラー' }));
     if (!res.ok) showMsg(`会話デモの開始に失敗: ${res.error ?? ''}`);
   };
@@ -786,7 +790,29 @@ export function FleetDashboard({ apiUrl }: Props) {
         </div>
 
         <div>
-          <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)', marginBottom: 8 }}>会話デモ(台本モード)</div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+            <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)' }}>会話デモ</div>
+            <div style={{ display: 'flex', background: 'var(--t-surface2)', borderRadius: 8, overflow: 'hidden' }}>
+              {([
+                ['script', '台本', '台本モード: 開始時にLLM1回で丸ごと台本を生成して再生します'],
+                ['interactive', '掛け合い', '掛け合いモード: 1ターンずつLLMを呼び、orangeのマイクで拾った来場者の発話も織り込みます'],
+              ] as ['script' | 'interactive', string, string][]).map(([m, label, title]) => (
+                <button
+                  key={m}
+                  onClick={() => setConvoMode(m)}
+                  disabled={!!convoStatus?.running}
+                  title={title}
+                  style={{
+                    padding: '4px 10px', border: 'none', fontSize: 12, whiteSpace: 'nowrap',
+                    cursor: convoStatus?.running ? 'not-allowed' : 'pointer',
+                    background: convoMode === m ? 'var(--t-accent)' : 'transparent',
+                    color: convoMode === m ? '#fff' : 'var(--t-text)',
+                    opacity: convoStatus?.running && convoMode !== m ? 0.5 : 1,
+                  }}
+                >{label}</button>
+              ))}
+            </div>
+          </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
               {allRobotNames.map(name => (
@@ -827,7 +853,9 @@ export function FleetDashboard({ apiUrl }: Props) {
             {convoStatus && (
               <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>
                 {convoStatus.running
-                  ? `再生中: ${convoStatus.current_turn}/${convoStatus.total_turns}ターン・経過${Math.round(convoStatus.elapsed_sec)}秒`
+                  ? (convoStatus.mode === 'interactive'
+                    ? `掛け合い中: 第${convoStatus.current_turn}ターン・経過${Math.round(convoStatus.elapsed_sec)}秒`
+                    : `再生中: ${convoStatus.current_turn}/${convoStatus.total_turns}ターン・経過${Math.round(convoStatus.elapsed_sec)}秒`)
                   : convoStatus.error
                     ? `エラー: ${convoStatus.error}`
                     : convoStatus.log.length > 0 ? `終了(経過${Math.round(convoStatus.elapsed_sec)}秒)` : '停止中'}
@@ -835,22 +863,26 @@ export function FleetDashboard({ apiUrl }: Props) {
             )}
             {convoStatus && convoStatus.log.length > 0 && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
-                {convoStatus.log.map((entry, i) => (
-                  <div key={i} style={{
-                    fontSize: 12, background: 'var(--t-surface2)', borderRadius: 8, padding: '6px 8px',
-                    borderLeft: `3px solid ${colorForRobot(entry.speaker)}`,
-                  }}>
-                    <span style={{ fontWeight: 'bold', color: colorForRobot(entry.speaker) }}>
-                      {nicknameForRobot(entry.speaker)}
-                    </span>
-                    <span style={{ marginLeft: 6, color: 'var(--t-text)' }}>{entry.text}</span>
-                    {entry.success === false && (
-                      <span style={{ marginLeft: 6, color: '#cc3333' }} title={entry.error || '発話に失敗しました'}>
-                        <Icon name="warning" size={12} />
+                {convoStatus.log.map((entry, i) => {
+                  const isHuman = entry.speaker === 'human';
+                  return (
+                    <div key={i} style={{
+                      fontSize: 12, background: 'var(--t-surface2)', borderRadius: 8, padding: '6px 8px',
+                      borderLeft: `3px solid ${colorForRobot(entry.speaker)}`,
+                      fontStyle: isHuman ? 'italic' : 'normal',
+                    }}>
+                      <span style={{ fontWeight: 'bold', color: colorForRobot(entry.speaker) }}>
+                        {isHuman && <Icon name="person" size={12} />} {nicknameForRobot(entry.speaker)}
                       </span>
-                    )}
-                  </div>
-                ))}
+                      <span style={{ marginLeft: 6, color: 'var(--t-text)' }}>{entry.text}</span>
+                      {entry.success === false && (
+                        <span style={{ marginLeft: 6, color: '#cc3333' }} title={entry.error || '発話に失敗しました'}>
+                          <Icon name="warning" size={12} />
+                        </span>
+                      )}
+                    </div>
+                  );
+                })}
               </div>
             )}
           </div>

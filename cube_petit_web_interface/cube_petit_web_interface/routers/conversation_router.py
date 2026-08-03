@@ -39,6 +39,11 @@ router = APIRouter()
 class ConversationStartRequest(BaseModel):
     participants: list[str]
     mode: str = 'script'
+    # interactive(掛け合い)モードのみ有効。各ロボット発話後に人間の発話を
+    # 待つ「間」の秒数(省略時はconversation_conductor_logic.
+    # DEFAULT_HUMAN_WINDOW_SEC=2.5秒)。フロントに直接のUIは無いが、将来
+    # の調整用にAPIとしては受けておく。
+    human_window_sec: float | None = None
 
 
 class ConversationStartResponse(BaseModel):
@@ -48,9 +53,9 @@ class ConversationStartResponse(BaseModel):
 
 @router.post('/fleet/conversation/start', response_model=ConversationStartResponse)
 async def start_fleet_conversation(req: ConversationStartRequest) -> ConversationStartResponse:
-    """会話デモを開始する(現状 mode='script' のみ対応)."""
+    """会話デモを開始する(mode='script'(台本)/'interactive'(掛け合い))."""
     try:
-        core.start_fleet_conversation(req.participants, req.mode)
+        core.start_fleet_conversation(req.participants, req.mode, req.human_window_sec)
     except (RuntimeError, core.conversation_conductor.ConductorError) as error:
         return ConversationStartResponse(ok=False, error=str(error))
     return ConversationStartResponse(ok=True)

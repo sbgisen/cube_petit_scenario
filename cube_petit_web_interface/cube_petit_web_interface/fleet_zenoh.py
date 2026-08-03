@@ -238,6 +238,30 @@ class FleetZenohWatcher:
         self._session.put(f'robots/{robot_name}/command', payload)
         return command_id
 
+    def publish_transcript(self, speaker: str, text: str) -> None:
+        """Broadcast one conversation-demo utterance to ``fleet/conversation/transcript``.
+
+        掛け合いモード(conversation_conductor.py)が人間の発話(ASRテキスト)を
+        履歴に取り込むたび呼ぶ。この機体(orange)自身のstatus API
+        (`/fleet/conversation/status`)には既にログとして載るので、これは
+        「他のフリート機体/webappからも見えるように」(plans/conversation_demo_plan.md)
+        するための追加のブロードキャスト。robots/<robot>/* とは別の、機体に
+        紐付かないフリート共有キー(fire-and-forget、購読側は未実装 -- 将来
+        他機体のweb_interfaceがここを購読すればそのまま表示できる)。
+
+        Args:
+            speaker: 発話者。人間なら conversation_conductor_logic.HUMAN_SPEAKER
+                (``'human'``)、ロボットならその短縮名。
+            text: 発話テキスト。
+
+        Raises:
+            RuntimeError: If the zenoh session isn't open (watcher not started).
+        """
+        if self._session is None:
+            raise RuntimeError('Fleet zenoh session is not open (watcher not started)')
+        payload = json.dumps({'speaker': speaker, 'text': text, 'ts': time.time()})
+        self._session.put('fleet/conversation/transcript', payload)
+
     # =================================================
     # chase (追いかけっこ): サーバー側常駐ループ
     # =================================================

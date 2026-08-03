@@ -42,6 +42,9 @@ export const ROBOT_COLOR: Record<string, string> = {
   violet: '#A78BFA', // setup_cube_petit/webapp/fleet.yaml と同じ値(ROSConJP 2026デモ機体)
   green: '#2ecc71',
   blue: '#3498db',
+  // 会話デモ「掛け合いモード」(conversation_conductor.py)のログで人間の発話を
+  // ロボットと区別するための色。ロボット群とは違う寒色(シアン)にして目立たせる。
+  human: '#00bcd4',
 };
 
 export const ROBOT_NICKNAME: Record<string, string> = {
@@ -52,6 +55,7 @@ export const ROBOT_NICKNAME: Record<string, string> = {
   violet: 'バイオレットプチ',
   green: 'グリーンプチ',
   blue: 'ブループチ',
+  human: '来場者',
 };
 
 export function colorForRobot(name: string): string {

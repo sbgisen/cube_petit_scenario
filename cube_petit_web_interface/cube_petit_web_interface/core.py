@@ -32,6 +32,7 @@ from fastapi import FastAPI
 
 if TYPE_CHECKING:
     from rclpy.node import Node
+    from std_msgs.msg import String
 
 try:
     # uvicorn cube_petit_web_interface.api_server:app で起動した場合
@@ -197,11 +198,29 @@ def get_node() -> Optional['Node']:
     return _node
 
 
+#: `realtime_gpt_chat`(cube_petit_interaction/cube_petit_chat)が
+#: `conversation.item.input_audio_transcription.completed` を受けるたびここへ
+#: `f'user: {transcript}'` を publish する(assistant発話は `assistant: `/
+#: `robot: ` prefix -- 会話デモの掛け合いモードが欲しいのは前者だけ)。
+#: 掛け合いモードのASRフックはこのトピックの `user: ` 行のみを使う。
+#: 既知の注意点: このトピックが載るのはrealtime_gpt_chatが音声ストリーミング
+#: 中(`enable_realtime_conversation` service で有効化された状態)のときだけで、
+#: 同じノードがトランスクリプトと同時にOpenAI Realtime APIのserver_vad
+#: turn_detectionでGPT応答も自動生成・発話してしまう(turn_detection.
+#: create_response をオフにするオプションがcube_petit_interaction側に無い) ため、
+#: 掛け合いモード中に人間が話しかけると通常チャットの自動応答とspeakが衝突
+#: しうる。この排他は今回のスコープでは未実装(cube_petit_interaction側の変更
+#: が必要 -- plans/conversation_demo_plan.md参照)。
+REALTIME_CONTENT_TOPIC_SUFFIX = 'realtime_conversation_content'
+_HUMAN_TRANSCRIPT_PREFIX = 'user: '
+
+
 def _start_ros() -> None:
     global _node, _tf_buffer, _tf_listener
     from cube_petit_chat_msgs.msg import RealtimeState
     import rclpy
     from rclpy.node import Node
+    from std_msgs.msg import String
     from tf2_ros import Buffer
     from tf2_ros import TransformListener
     rclpy.init()
@@ -219,7 +238,22 @@ def _start_ros() -> None:
             return cb
 
         _node.create_subscription(RealtimeState, f'/{ns}/realtime_conversation_status', make_cb(ns), 10)
+
+    # 会話デモ「掛け合いモード」用ASRフック: orangeのマイク(この機体自身)から
+    # 拾われた人間の発話テキストだけを指揮者へ橋渡しする。指揮者未起動/台本
+    # モード中/idle中は submit_human_utterance() 側が無視するので、ここでは
+    # 単純に毎回forwardするだけでよい(2026-08-03、plans/conversation_demo_plan.md)。
+    _node.create_subscription(String, f'/{DEFAULT_NAMESPACE}/{REALTIME_CONTENT_TOPIC_SUFFIX}',
+                              _on_realtime_conversation_content, 10)
     rclpy.spin(_node)
+
+
+def _on_realtime_conversation_content(msg: 'String') -> None:
+    if not msg.data.startswith(_HUMAN_TRANSCRIPT_PREFIX):
+        return  # assistant/robot: 発話はここでは無視(掛け合いモードは人間の発話だけ拾う)
+    if _conversation_conductor is None:
+        return
+    _conversation_conductor.submit_human_utterance(msg.data[len(_HUMAN_TRANSCRIPT_PREFIX):])
 
 
 def start_ros_thread() -> None:
@@ -321,18 +355,30 @@ def _get_conversation_conductor() -> 'conversation_conductor.ConversationConduct
         _conversation_conductor = conversation_conductor.ConversationConductor(
             send_command=_fleet_watcher.send_command,
             wait_for_completion=_fleet_watcher.wait_for_completion,
+            # 掛け合いモードの人間発話をfleet zenohへも流す(他機体/webappから見える
+            # ように -- publish_transcript()自体はfire-and-forgetでbest-effort)。
+            publish_transcript=_fleet_watcher.publish_transcript,
         )
     return _conversation_conductor
 
 
-def start_fleet_conversation(participants: list, mode: str = 'script') -> None:
+def start_fleet_conversation(participants: list,
+                             mode: str = 'script',
+                             human_window_sec: Optional[float] = None) -> None:
     """会話デモ(指揮者)を開始する.
+
+    Args:
+        participants: 参加機体名(短縮/フル名どちらも可)。
+        mode: 'script'(台本モード、既定)または'interactive'(掛け合いモード)。
+        human_window_sec: 掛け合いモードのみ。各ロボット発話後に人間の発話を
+            待つ「間」の秒数(省略時はconversation_conductor_logic.
+            DEFAULT_HUMAN_WINDOW_SEC)。
 
     Raises:
         RuntimeError: フリート監視(zenoh)が起動していない場合。
         conversation_conductor.ConductorError: 既に実行中/参加機体不足/未対応モード。
     """
-    _get_conversation_conductor().start(participants, mode)
+    _get_conversation_conductor().start(participants, mode, human_window_sec)
 
 
 def stop_fleet_conversation() -> None:

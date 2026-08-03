@@ -253,3 +253,129 @@ def test_logic_full_robot_name_matches_fleet_bridge_convention() -> None:
     # Sanity check the two modules agree on the wire convention
     # (cube_petit_fleet_bridge.fleet_bridge_logic.robot_key expects this shape).
     assert logic.full_robot_name('orange') == 'cube_petit_orange'
+
+
+def _turn_json(speaker: str, text: str = 'セリフ') -> str:
+    return json.dumps({'speaker': speaker, 'text': text, 'face': 'happy'})
+
+
+class _CyclingTurnLlm:
+    """Stub turn_llm_call that cycles through participants each call."""
+
+    def __init__(self, participants: list) -> None:
+        self._participants = participants
+        self.calls = 0
+
+    def __call__(self, prompt: str) -> str:
+        speaker = self._participants[self.calls % len(self._participants)]
+        self.calls += 1
+        return _turn_json(speaker)
+
+
+@pytest.fixture(autouse=True)
+def _fast_interactive_timing(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Real 45s/60s 1分制御 + 2.5s human window would make tests slow for no
+    # benefit -- shrink to something a test can hit deterministically and fast.
+    monkeypatch.setattr(logic, 'INTERACTIVE_SOFT_CLOSE_SEC', 1000.0)
+    monkeypatch.setattr(logic, 'INTERACTIVE_HARD_CLOSE_SEC', 1000.0)
+    monkeypatch.setattr(conversation_conductor, 'TURN_RETRY_BACKOFF_SEC', 0.0)
+
+
+class TestInteractiveMode:
+
+    def test_runs_turns_until_stopped_and_records_them(self) -> None:
+        zenoh = _StubZenoh()
+        turn_llm = _CyclingTurnLlm(['orange', 'pink', 'violet'])
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 turn_llm_call=turn_llm)
+        conductor.start(['orange', 'pink', 'violet'], mode='interactive', human_window_sec=0.01)
+        deadline = time.monotonic() + 2.0
+        while turn_llm.calls < 3 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        conductor.stop()
+        _wait_until_idle(conductor)
+
+        status = conductor.status()
+        assert status['mode'] == 'interactive'
+        assert status['error'] == ''
+        assert len(status['log']) >= 3
+        assert all(entry['speaker'] in ('orange', 'pink', 'violet') for entry in status['log'])
+
+    def test_human_utterance_is_recorded_in_log_and_broadcast(self) -> None:
+        zenoh = _StubZenoh()
+        turn_llm = _CyclingTurnLlm(['orange', 'pink'])
+        broadcast: list = []
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 turn_llm_call=turn_llm,
+                                                                 publish_transcript=lambda s, t: broadcast.append(
+                                                                     (s, t)))
+        # Long human window so the injected utterance is reliably captured within it.
+        conductor.start(['orange', 'pink'], mode='interactive', human_window_sec=1.0)
+        deadline = time.monotonic() + 2.0
+        while turn_llm.calls < 1 and time.monotonic() < deadline:
+            time.sleep(0.01)
+        conductor.submit_human_utterance('ピンクちゃん、こんにちは')
+        deadline = time.monotonic() + 2.0
+        while not any(e['speaker'] == logic.HUMAN_SPEAKER for e in conductor.status()['log']) \
+                and time.monotonic() < deadline:
+            time.sleep(0.01)
+        conductor.stop()
+        _wait_until_idle(conductor)
+
+        status = conductor.status()
+        human_entries = [e for e in status['log'] if e['speaker'] == logic.HUMAN_SPEAKER]
+        assert len(human_entries) == 1
+        assert human_entries[0]['text'] == 'ピンクちゃん、こんにちは'
+        assert broadcast == [(logic.HUMAN_SPEAKER, 'ピンクちゃん、こんにちは')]
+
+    def test_submit_human_utterance_ignored_when_not_running(self) -> None:
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command, zenoh.wait_for_completion)
+        conductor.submit_human_utterance('誰も聞いていない')
+        assert conductor.status()['log'] == []
+
+    def test_submit_human_utterance_ignored_during_script_mode(self) -> None:
+        zenoh = _StubZenoh(block_completion=True)
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 llm_call=lambda p: _script_json(VALID_SCRIPT))
+        conductor.start(['orange', 'pink', 'violet'], mode='script')
+        try:
+            conductor.submit_human_utterance('台本モード中の発話')
+            assert not any(e['speaker'] == logic.HUMAN_SPEAKER for e in conductor.status()['log'])
+        finally:
+            conductor.stop()
+            zenoh.release()
+            _wait_until_idle(conductor)
+
+    def test_forces_closing_turn_once_hard_close_elapses(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(logic, 'INTERACTIVE_HARD_CLOSE_SEC', 0.0)
+        zenoh = _StubZenoh()
+        turn_llm = _CyclingTurnLlm(['orange', 'pink'])
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 turn_llm_call=turn_llm)
+        conductor.start(['orange', 'pink'], mode='interactive', human_window_sec=0.01)
+        _wait_until_idle(conductor)
+
+        status = conductor.status()
+        assert status['error'] == ''
+        # The forced closing turn never calls the (stubbed) LLM.
+        assert turn_llm.calls == 0
+        assert len(status['log']) == 1
+        assert status['log'][0]['text'] in logic.FORCED_CLOSING_TEMPLATES
+
+    def test_persistent_turn_generation_failure_ends_run_with_error(self) -> None:
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 turn_llm_call=lambda p: 'not valid json')
+        conductor.start(['orange', 'pink'], mode='interactive', human_window_sec=0.01)
+        _wait_until_idle(conductor, timeout=5.0)
+
+        status = conductor.status()
+        assert status['running'] is False
+        assert 'consecutive' in status['error'].lower()
+        assert zenoh.sent == []

@@ -188,3 +188,160 @@ class TestBuildStatusPayload:
         state = {'running': False, 'elapsed_sec': 42.0, 'started_at': 10.0, 'now': 999.0}
         payload = logic.build_status_payload(state)
         assert payload['elapsed_sec'] == 42.0
+
+    def test_interactive_mode_total_turns_mirrors_current_turn(self) -> None:
+        # 掛け合いモードは台本を事前生成しないので総ターン数が不明 -- 「わかっている
+        # 総数」として current_turn をそのまま返す(進捗バーではなく経過秒で見せる想定)。
+        state = {
+            'running': True,
+            'mode': 'interactive',
+            'participants': ['orange', 'pink'],
+            'script': [],
+            'current_turn': 3,
+            'log': [],
+            'started_at': 10.0,
+            'now': 15.0,
+        }
+        payload = logic.build_status_payload(state)
+        assert payload['total_turns'] == 3
+
+
+class TestParseTurnResponse:
+
+    PARTICIPANTS = ['orange', 'pink', 'violet']
+
+    def test_accepts_valid_json_object_string(self) -> None:
+        raw = json.dumps({'speaker': 'pink', 'text': 'こんにちは', 'face': 'happy'})
+        turn = logic.parse_turn_response(raw, self.PARTICIPANTS)
+        assert turn == {'speaker': 'pink', 'text': 'こんにちは', 'face': 'happy'}
+
+    def test_accepts_pre_parsed_dict(self) -> None:
+        turn = logic.parse_turn_response({'speaker': 'orange', 'text': 'やあ'}, self.PARTICIPANTS)
+        assert turn['speaker'] == 'orange'
+        assert turn['face'] == logic.DEFAULT_FACE
+
+    def test_tolerates_single_element_array_wrapping(self) -> None:
+        raw = json.dumps([{'speaker': 'violet', 'text': 'ねー'}])
+        turn = logic.parse_turn_response(raw, self.PARTICIPANTS)
+        assert turn['speaker'] == 'violet'
+
+    def test_strips_markdown_code_fence(self) -> None:
+        raw = '```json\n' + json.dumps({'speaker': 'orange', 'text': 'やあ'}) + '\n```'
+        turn = logic.parse_turn_response(raw, self.PARTICIPANTS)
+        assert turn['speaker'] == 'orange'
+
+    def test_rejects_invalid_json(self) -> None:
+        with pytest.raises(logic.ScriptError):
+            logic.parse_turn_response('not json', self.PARTICIPANTS)
+
+    def test_rejects_empty_array(self) -> None:
+        with pytest.raises(logic.ScriptError):
+            logic.parse_turn_response('[]', self.PARTICIPANTS)
+
+    def test_rejects_unknown_speaker(self) -> None:
+        with pytest.raises(logic.ScriptError):
+            logic.parse_turn_response({'speaker': 'yellow', 'text': 'やあ'}, self.PARTICIPANTS)
+
+    def test_rejects_empty_text(self) -> None:
+        with pytest.raises(logic.ScriptError):
+            logic.parse_turn_response({'speaker': 'orange', 'text': '   '}, self.PARTICIPANTS)
+
+    def test_truncates_overlong_text(self) -> None:
+        long_text = 'あ' * (logic.MAX_TURN_TEXT_CHARS + 50)
+        turn = logic.parse_turn_response({'speaker': 'orange', 'text': long_text}, self.PARTICIPANTS)
+        assert len(turn['text']) == logic.MAX_TURN_TEXT_CHARS
+
+
+class TestBuildTurnPrompt:
+
+    def test_mentions_every_participant_nickname(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0)
+        assert 'オレンジプチ' in prompt
+        assert 'ピンクプチ' in prompt
+
+    def test_includes_history_lines(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        history = [{'speaker': 'orange', 'text': 'やっほー'}, {'speaker': logic.HUMAN_SPEAKER, 'text': 'こんにちは'}]
+        prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, history, 5.0)
+        assert 'やっほー' in prompt
+        assert 'こんにちは' in prompt
+
+    def test_no_history_uses_placeholder(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0)
+        assert 'まだ発言はありません' in prompt
+
+    def test_closing_hint_adds_wrap_up_instruction(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        without_hint = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 46.0, closing_hint=False)
+        with_hint = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 46.0, closing_hint=True)
+        assert '締めくく' in with_hint
+        assert '締めくく' not in without_hint
+
+    def test_asks_for_single_json_object(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0)
+        assert 'JSONオブジェクト1つ' in prompt
+
+
+class TestNormalizeHumanUtterance:
+
+    def test_strips_whitespace(self) -> None:
+        assert logic.normalize_human_utterance('  こんにちは  ') == 'こんにちは'
+
+    def test_empty_or_whitespace_only_becomes_empty_string(self) -> None:
+        assert logic.normalize_human_utterance('   ') == ''
+        assert logic.normalize_human_utterance('') == ''
+
+    def test_clips_to_max_length(self) -> None:
+        long_text = 'あ' * (logic.MAX_HUMAN_TEXT_CHARS + 20)
+        assert len(logic.normalize_human_utterance(long_text)) == logic.MAX_HUMAN_TEXT_CHARS
+
+    def test_non_string_input_returns_empty(self) -> None:
+        assert logic.normalize_human_utterance(None) == ''  # type: ignore[arg-type]
+
+
+class TestLastRobotSpeaker:
+
+    def test_finds_most_recent_robot_entry(self) -> None:
+        history = [
+            {
+                'speaker': 'orange',
+                'text': 'a'
+            },
+            {
+                'speaker': logic.HUMAN_SPEAKER,
+                'text': 'b'
+            },
+            {
+                'speaker': 'pink',
+                'text': 'c'
+            },
+        ]
+        assert logic.last_robot_speaker(history, ['orange', 'pink', 'violet']) == 'pink'
+
+    def test_defaults_to_first_participant_when_no_history(self) -> None:
+        assert logic.last_robot_speaker([], ['orange', 'pink', 'violet']) == 'orange'
+
+    def test_ignores_human_entries(self) -> None:
+        history = [{'speaker': logic.HUMAN_SPEAKER, 'text': 'hi'}]
+        assert logic.last_robot_speaker(history, ['orange', 'pink']) == 'orange'
+
+
+class TestForcedClosingAndTiming:
+
+    def test_build_forced_closing_turn_uses_given_speaker(self) -> None:
+        personalities = logic.load_personalities(['orange'], Path('/nonexistent'))
+        turn = logic.build_forced_closing_turn('orange', personalities)
+        assert turn['speaker'] == 'orange'
+        assert turn['text']
+        assert turn['face'] in logic.VALID_FACES
+
+    def test_should_inject_closing_hint_threshold(self) -> None:
+        assert logic.should_inject_closing_hint(logic.INTERACTIVE_SOFT_CLOSE_SEC) is True
+        assert logic.should_inject_closing_hint(logic.INTERACTIVE_SOFT_CLOSE_SEC - 1) is False
+
+    def test_should_force_close_threshold(self) -> None:
+        assert logic.should_force_close(logic.INTERACTIVE_HARD_CLOSE_SEC) is True
+        assert logic.should_force_close(logic.INTERACTIVE_HARD_CLOSE_SEC - 1) is False
