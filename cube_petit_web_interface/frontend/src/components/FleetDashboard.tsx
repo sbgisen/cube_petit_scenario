@@ -76,11 +76,11 @@ function loadFleetSubTab(): FleetSubTab {
 // SSR/初期描画のちらつき無しのため)。
 const FLEET_LAYOUT_STYLE = `
 .fleet-root { display: flex; gap: 12px; height: 100%; overflow: hidden; }
-.fleet-left { flex: 3 1 0; min-width: 0; display: flex; gap: 12px; min-height: 0; }
-.fleet-right { flex: 1 1 320px; min-width: 240px; max-width: 420px; display: flex; flex-direction: column; min-height: 0; }
+.fleet-left { flex: 5 1 0; min-width: 0; min-height: 0; }
+.fleet-right { flex: 1 1 300px; min-width: 240px; max-width: 380px; display: flex; flex-direction: column; min-height: 0; }
 @media (max-width: 860px) {
   .fleet-root { flex-direction: column; overflow-y: auto; }
-  .fleet-left { flex: 1 1 auto; min-height: 45vh; }
+  .fleet-left { flex: 1 1 auto; min-height: 60vh; }
   .fleet-right { flex: 1 1 auto; max-width: none; min-height: 320px; }
 }
 `;
@@ -635,10 +635,8 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
       )}
 
       <div className="fleet-root">
-      {/* 左: マップ+機体一覧は常時表示(サブタブの影響を受けない) */}
-      <div className="fleet-left">
-      {/* マップ + ロボット重畳表示 */}
-      <div style={{ flex: 3, minWidth: 0, position: 'relative', background: 'var(--t-surface)', borderRadius: 12, overflow: 'hidden' }}>
+      {/* 左: マップ(常時表示、主役として大きく)。機体一覧は追いかけっこサブタブ側へ移動 */}
+      <div className="fleet-left" style={{ position: 'relative', background: 'var(--t-surface)', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 5, display: 'flex', gap: 8, alignItems: 'center' }}>
           <select value={selectedMap} onChange={e => setSelectedMap(e.target.value)} style={{
             padding: '6px 10px', borderRadius: 8, border: '1px solid var(--t-border2)',
@@ -771,8 +769,34 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
         </div>
       </div>
 
-      {/* 右: 操作パネル */}
-      <div style={{ flex: 1, minWidth: 220, maxWidth: 280, display: 'flex', flexDirection: 'column', gap: 16, overflowY: 'auto' }}>
+      {/* 右: サブタブ(追いかけっこ/連携会話)。マップとは独立に切り替わる */}
+      <div className="fleet-right">
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--t-border)', marginBottom: 10, flexShrink: 0 }}>
+          {FLEET_SUBTAB_ORDER.map(id => (
+            <button
+              key={id}
+              onClick={() => setSubTab(id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', marginBottom: -1,
+                border: 'none', background: 'none', cursor: 'pointer', fontSize: 13,
+                color: subTab === id ? 'var(--t-text)' : 'var(--t-text-dim)',
+                fontWeight: subTab === id ? 'bold' : 'normal',
+                borderBottom: `2px solid ${subTab === id ? 'var(--t-accent)' : 'transparent'}`,
+              }}
+            >
+              {subTabLabels[id]}
+              {subTabIndicators[id] && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--t-accent)', flexShrink: 0 }} />
+              )}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+
+      {/* 追いかけっこ: 機体一覧(ステータスカード)+ chaser/target選択と開始/停止(既存のchase UI)。
+          機体選択と機体情報の相性がいいためこのサブタブにまとめている */}
+      {subTab === 'chase' && (
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)', marginBottom: 8 }}>機体一覧</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -805,35 +829,7 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
             </div>
           )}
         </div>
-      </div>
-      </div>
 
-      {/* 右: サブタブ(追いかけっこ/連携会話)。マップ/機体一覧とは独立に切り替わる */}
-      <div className="fleet-right">
-        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--t-border)', marginBottom: 10, flexShrink: 0 }}>
-          {FLEET_SUBTAB_ORDER.map(id => (
-            <button
-              key={id}
-              onClick={() => setSubTab(id)}
-              style={{
-                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', marginBottom: -1,
-                border: 'none', background: 'none', cursor: 'pointer', fontSize: 13,
-                color: subTab === id ? 'var(--t-text)' : 'var(--t-text-dim)',
-                fontWeight: subTab === id ? 'bold' : 'normal',
-                borderBottom: `2px solid ${subTab === id ? 'var(--t-accent)' : 'transparent'}`,
-              }}
-            >
-              {subTabLabels[id]}
-              {subTabIndicators[id] && (
-                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--t-accent)', flexShrink: 0 }} />
-              )}
-            </button>
-          ))}
-        </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-
-      {/* 追いかけっこ: chaser/target選択と開始/停止(既存のchase UI) */}
-      {subTab === 'chase' && (
         <div>
           <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)', marginBottom: 8 }}>追いかけっこモード</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -887,6 +883,7 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
               </div>
             )}
           </div>
+        </div>
         </div>
       )}
 
