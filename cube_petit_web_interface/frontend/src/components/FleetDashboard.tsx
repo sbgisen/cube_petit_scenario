@@ -78,10 +78,14 @@ const FLEET_LAYOUT_STYLE = `
 .fleet-root { display: flex; gap: 12px; height: 100%; overflow: hidden; }
 .fleet-left { flex: 5 1 0; min-width: 0; min-height: 0; }
 .fleet-right { flex: 1 1 300px; min-width: 240px; max-width: 380px; display: flex; flex-direction: column; min-height: 0; }
+.fleet-convo-log { flex: 1 1 auto; min-height: 0; overflow-y: auto; }
 @media (max-width: 860px) {
   .fleet-root { flex-direction: column; overflow-y: auto; }
   .fleet-left { flex: 1 1 auto; min-height: 60vh; }
   .fleet-right { flex: 1 1 auto; max-width: none; min-height: 320px; }
+  /* 縦スタック時はfleet-rightの高さが内容依存で伸縮するため、flex:1だけでは
+     ログ領域が潰れてしまう。最低限のスクロール領域として高さを明示する */
+  .fleet-convo-log { min-height: 40vh; }
 }
 `;
 
@@ -165,6 +169,23 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
   // 話題を差し替えたい時だけ折りたたみを開いて編集する(普段は畳んでおく)。
   const [convoContext, setConvoContext] = useState(DEFAULT_VENUE_CONTEXT);
   const [convoContextOpen, setConvoContextOpen] = useState(false);
+
+  // ライブログの自動追従スクロール: 新しい発話が来たら自動で最下部へ。ただし
+  // ユーザーが手動で上へスクロールして過去ログを読んでいる間は追従しない
+  // (スクロール位置が下端付近にあるときだけ「追従中」とみなす)。
+  const convoLogRef = useRef<HTMLDivElement>(null);
+  const convoStickToBottomRef = useRef(true);
+  const onConvoLogScroll = () => {
+    const el = convoLogRef.current;
+    if (!el) return;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    convoStickToBottomRef.current = distanceFromBottom < 40;
+  };
+  useEffect(() => {
+    if (!convoStickToBottomRef.current) return;
+    const el = convoLogRef.current;
+    if (el) el.scrollTop = el.scrollHeight;
+  }, [convoStatus?.log.length]);
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
@@ -791,12 +812,12 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
             </button>
           ))}
         </div>
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+        <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
 
       {/* 追いかけっこ: 機体一覧(ステータスカード)+ chaser/target選択と開始/停止(既存のchase UI)。
           機体選択と機体情報の相性がいいためこのサブタブにまとめている */}
       {subTab === 'chase' && (
-        <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 16, flex: 1, minHeight: 0, overflowY: 'auto' }}>
         <div>
           <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)', marginBottom: 8 }}>機体一覧</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -888,10 +909,11 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
       )}
 
       {/* 連携会話: 会話デモパネル(モード切替・機体選択・会場コンテキスト・
-          ライブログ・経過時間) */}
+          ライブログ・経過時間)。ログ以外は自然な高さで固定し、ログだけが
+          残り高さいっぱいに伸びてスクロールする(flex:1 + minHeight:0の連鎖)。 */}
       {subTab === 'talk' && (
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+        <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8, flexShrink: 0 }}>
             <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)' }}>会話デモ</div>
             <div style={{ display: 'flex', background: 'var(--t-surface2)', borderRadius: 8, overflow: 'hidden' }}>
               {([
@@ -914,7 +936,7 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
               ))}
             </div>
           </div>
-          <div style={{ marginBottom: 8 }}>
+          <div style={{ marginBottom: 8, flexShrink: 0 }}>
             <button
               onClick={() => setConvoContextOpen(v => !v)}
               style={{
@@ -939,8 +961,8 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
               />
             )}
           </div>
-          <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 6, flex: 1, minHeight: 0 }}>
+            <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, flexShrink: 0 }}>
               {allRobotNames.map(name => (
                 <label key={name} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, cursor: 'pointer' }}>
                   <input
@@ -954,7 +976,7 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
               ))}
               {allRobotNames.length === 0 && <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>フリートが見えていません</div>}
             </div>
-            <div style={{ display: 'flex', gap: 8 }}>
+            <div style={{ display: 'flex', gap: 8, flexShrink: 0 }}>
               <button
                 onClick={startConversation}
                 disabled={!!convoStatus?.running || convoParticipants.length < 2}
@@ -977,7 +999,7 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
               ><Icon name="stop" size={16} /> 停止</button>
             </div>
             {convoStatus && (
-              <div style={{ fontSize: 11, color: 'var(--t-text-dim)' }}>
+              <div style={{ fontSize: 11, color: 'var(--t-text-dim)', flexShrink: 0 }}>
                 {convoStatus.running
                   ? (convoStatus.mode === 'interactive'
                     ? `掛け合い中: 第${convoStatus.current_turn}ターン・経過${Math.round(convoStatus.elapsed_sec)}秒`
@@ -988,7 +1010,12 @@ export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
               </div>
             )}
             {convoStatus && convoStatus.log.length > 0 && (
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 4, maxHeight: 220, overflowY: 'auto' }}>
+              <div
+                ref={convoLogRef}
+                onScroll={onConvoLogScroll}
+                className="fleet-convo-log"
+                style={{ display: 'flex', flexDirection: 'column', gap: 4 }}
+              >
                 {convoStatus.log.map((entry, i) => {
                   const isHuman = entry.speaker === 'human';
                   return (
