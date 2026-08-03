@@ -80,7 +80,7 @@ class TestBuildScriptPrompt:
         personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
         prompt = logic.build_script_prompt(['orange', 'pink'], personalities)
         assert logic.DEFAULT_VENUE_CONTEXT in prompt
-        assert 'ROSCon JP 2026' in prompt
+        assert 'ロスコンジェーピー2026' in prompt
 
     def test_includes_custom_context_instead_of_default(self) -> None:
         personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
@@ -301,7 +301,7 @@ class TestBuildTurnPrompt:
         personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
         prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0)
         assert logic.DEFAULT_VENUE_CONTEXT in prompt
-        assert 'ROSCon JP 2026' in prompt
+        assert 'ロスコンジェーピー2026' in prompt
 
     def test_includes_custom_context_instead_of_default(self) -> None:
         personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))

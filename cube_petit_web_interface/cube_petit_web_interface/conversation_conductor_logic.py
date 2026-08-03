@@ -57,22 +57,27 @@ DEFAULT_PARTICIPANTS: typing.Tuple[str, ...] = ('orange', 'pink', 'violet')
 #: build_script_prompt()/build_turn_prompt() (wired from
 #: `/fleet/conversation/start`'s optional `context` field, see
 #: routers/conversation_router.py), e.g. to swap topics live at the booth.
-DEFAULT_VENUE_CONTEXT: str = ('ここはROSCon JP 2026(2026年8月4日・5日、茨城県つくば市の「つくばカピオ」)の会場です。'
-                              'ROSコミュニティの年次イベントで、来場者はロボット開発者や研究者、学生が中心です。'
-                              'ブースの前で会話を聞いている人にも届くように、ROSやロボット開発、つくば、'
+# NOTE: deliberately written with katakana readings only (ロスコンジェーピー etc.,
+# no Latin spellings like "ROSCon JP") -- the LLM mirrors whatever spelling the
+# context uses, and Latin text comes out garbled through jtalk TTS.
+DEFAULT_VENUE_CONTEXT: str = ('ここはロスコンジェーピー2026(2026年8月4日・5日、'
+                              '茨城県つくば市の「つくばカピオ」)の会場です。'
+                              'ロス(ロボットの共通ソフト基盤)のコミュニティの年次イベントで、'
+                              '来場者はロボット開発者や研究者、学生が中心です。'
+                              'ブースの前で会話を聞いている人にも届くように、ロスやロボット開発、つくば、'
                               'このイベント自体の話題を好んで話してください。\n'
-                              'わたしたちキューブプチ(CubePetit)は22cm角・約6.3kgの立方体型パーソナルロボットです。'
-                              'ROS 2 Jazzyで動いていて、LiDARとデプスカメラで自律ナビゲーションをし、'
-                              'LLMでおしゃべりをして、ディスプレイの顔で表情を出します。研究・開発のプラットフォームとして使われていて、'
-                              '今日はorange・pink・violetの3台で来ています。violetは今日は移動せずおしゃべり担当、'
-                              'orangeとpinkは追いかけっこが得意です。\n'
+                              'わたしたちキューブプチは22センチ角・約6.3キロの立方体型パーソナルロボットです。'
+                              'ロスツー ジャジーで動いていて、ライダーとデプスカメラで自律ナビゲーションをし、'
+                              'エルエルエムでおしゃべりをして、ディスプレイの顔で表情を出します。'
+                              '研究・開発のプラットフォームとして使われていて、'
+                              '今日はオレンジプチ・ピンクプチ・バイオレットプチの3台で来ています。'
+                              'バイオレットプチは今日は移動せずおしゃべり担当、'
+                              'オレンジプチとピンクプチは追いかけっこが得意です。\n'
                               '技術的な話も交えつつ、かわいらしく短い言葉で話してください。誇張したり、'
                               '実際にはできないことをできると言ったりしないでください。\n'
-                              'セリフは音声合成でそのまま読み上げられるので、英字の固有名詞や略語は'
-                              'カタカナの読みで書いてください。英字のまま書いてはいけません'
-                              '(例: ROSCon JP→ロスコンジェーピー、ROS 2 Jazzy→ロスツー ジャジー、'
-                              'ROS 2→ロスツー、ROS→ロス、Jazzy→ジャジー、LiDAR→ライダー、'
-                              'LLM→エルエルエム、CubePetit→キューブプチ)。')
+                              'セリフは音声合成でそのまま読み上げられます。英字の固有名詞・略語は絶対に'
+                              '英字のまま書かず、必ずカタカナの読みで書いてください'
+                              '(ロスコンジェーピー、ロスツー ジャジー、ライダー、エルエルエムのように)。')
 
 #: Facial expressions cube_petit_facial_animation actually supports (see
 #: frontend/src/components/ExpressionGrid.tsx's EXPRESSIONS list in this
