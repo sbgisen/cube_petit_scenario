@@ -52,7 +52,38 @@ interface ConversationStatus {
 
 interface Props {
   apiUrl: string;
+  // UI language toggle, shared with App.tsx's header/settings drawer. Defaults to 'ja'
+  // for callers that don't pass it (e.g. tests) so existing behavior is unaffected.
+  uiLang?: 'ja' | 'en';
 }
+
+// マップ(共有マップ+全機体現在地+集合等の操作)と機体一覧(ステータスカード)は
+// 常時表示(左側のメイン領域)。右側だけを「追いかけっこ」「連携会話」の2サブタブで
+// 切り替える。以前は右カラム全体が縦積みでスクロールしていたのを解消するための構成。
+type FleetSubTab = 'chase' | 'talk';
+const FLEET_SUBTAB_ORDER: FleetSubTab[] = ['chase', 'talk'];
+const FLEET_SUBTAB_STRINGS: Record<'ja' | 'en', Record<FleetSubTab, string>> = {
+  ja: { chase: '追いかけっこ', talk: '連携会話' },
+  en: { chase: 'Chase', talk: 'Talk Demo' },
+};
+const FLEET_SUBTAB_KEY = 'fleet_subtab';
+function loadFleetSubTab(): FleetSubTab {
+  return localStorage.getItem(FLEET_SUBTAB_KEY) === 'talk' ? 'talk' : 'chase';
+}
+
+// 画面が狭い(iPad縦等)ときは左(マップ+機体一覧)/右(サブタブ)を上下スタックに
+// 落とす。JSでの幅判定ではなくCSSメディアクエリで切り替える(リサイズ追従・
+// SSR/初期描画のちらつき無しのため)。
+const FLEET_LAYOUT_STYLE = `
+.fleet-root { display: flex; gap: 12px; height: 100%; overflow: hidden; }
+.fleet-left { flex: 3 1 0; min-width: 0; display: flex; gap: 12px; min-height: 0; }
+.fleet-right { flex: 1 1 320px; min-width: 240px; max-width: 420px; display: flex; flex-direction: column; min-height: 0; }
+@media (max-width: 860px) {
+  .fleet-root { flex-direction: column; overflow-y: auto; }
+  .fleet-left { flex: 1 1 auto; min-height: 45vh; }
+  .fleet-right { flex: 1 1 auto; max-width: none; min-height: 320px; }
+}
+`;
 
 const POLL_MS = 1000;
 const CHASE_PERIOD_MS = 3000;
@@ -78,7 +109,12 @@ const DEFAULT_VENUE_CONTEXT =
   '技術的な話も交えつつ、かわいらしく短い言葉で話してください。誇張したり、' +
   '実際にはできないことをできると言ったりしないでください。';
 
-export function FleetDashboard({ apiUrl }: Props) {
+export function FleetDashboard({ apiUrl, uiLang = 'ja' }: Props) {
+  // Sub tab selection persists across reloads (localStorage), independent of the
+  // polling/subscriptions below, which keep running regardless of which sub tab is shown.
+  const [subTab, setSubTab] = useState<FleetSubTab>(loadFleetSubTab);
+  useEffect(() => { localStorage.setItem(FLEET_SUBTAB_KEY, subTab); }, [subTab]);
+
   const [maps, setMaps] = useState<string[]>([]);
   const [selectedMap, setSelectedMap] = useState('');
   const [meta, setMeta] = useState<MapMeta | null>(null);
@@ -579,9 +615,29 @@ export function FleetDashboard({ apiUrl }: Props) {
   // 目標にmove_to_poseしても座標系が合わず届かないため)
   const robotNamesOnSelectedMap = onlineRobotsOnMap.map(([name]) => name).sort();
 
+  // Running-state indicators shown as a small dot on the corresponding sub tab.
+  const subTabIndicators: Record<FleetSubTab, boolean> = {
+    chase: chasePairs.length > 0,
+    talk: !!convoStatus?.running,
+  };
+  const subTabLabels = FLEET_SUBTAB_STRINGS[uiLang];
+
   return (
-    <div style={{ display: 'flex', gap: 12, height: '100%', overflow: 'hidden' }}>
-      {/* 左: マップ + ロボット重畳表示 */}
+    <div style={{ height: '100%', position: 'relative' }}>
+      <style>{FLEET_LAYOUT_STYLE}</style>
+
+      {/* トースト通知: マップ操作/追いかけっこ/連携会話のどこから出た通知でも、
+          左右どちらを見ていても気づけるよう画面全体の最上部に固定表示する */}
+      {msg && (
+        <div style={{ position: 'absolute', top: 0, left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '6px 16px', borderRadius: 12, fontSize: 12, zIndex: 10, whiteSpace: 'nowrap' }}>
+          {msg}
+        </div>
+      )}
+
+      <div className="fleet-root">
+      {/* 左: マップ+機体一覧は常時表示(サブタブの影響を受けない) */}
+      <div className="fleet-left">
+      {/* マップ + ロボット重畳表示 */}
       <div style={{ flex: 3, minWidth: 0, position: 'relative', background: 'var(--t-surface)', borderRadius: 12, overflow: 'hidden' }}>
         <div style={{ position: 'absolute', top: 8, left: 8, zIndex: 5, display: 'flex', gap: 8, alignItems: 'center' }}>
           <select value={selectedMap} onChange={e => setSelectedMap(e.target.value)} style={{
@@ -630,11 +686,6 @@ export function FleetDashboard({ apiUrl }: Props) {
             <Icon name={mapLocked ? 'lock' : 'lock_open'} size={15} />
           </button>
         </div>
-        {msg && (
-          <div style={{ position: 'absolute', top: 8, left: '50%', transform: 'translateX(-50%)', background: '#333', color: '#fff', padding: '6px 16px', borderRadius: 12, fontSize: 12, zIndex: 10, whiteSpace: 'nowrap' }}>
-            {msg}
-          </div>
-        )}
         {!mapImg && (
           <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--t-text-dim)', fontSize: 13 }}>
             {selectedMap ? 'マップ読み込み中...' : 'マップがありません'}
@@ -754,7 +805,35 @@ export function FleetDashboard({ apiUrl }: Props) {
             </div>
           )}
         </div>
+      </div>
+      </div>
 
+      {/* 右: サブタブ(追いかけっこ/連携会話)。マップ/機体一覧とは独立に切り替わる */}
+      <div className="fleet-right">
+        <div style={{ display: 'flex', gap: 4, borderBottom: '1px solid var(--t-border)', marginBottom: 10, flexShrink: 0 }}>
+          {FLEET_SUBTAB_ORDER.map(id => (
+            <button
+              key={id}
+              onClick={() => setSubTab(id)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 6, padding: '7px 14px', marginBottom: -1,
+                border: 'none', background: 'none', cursor: 'pointer', fontSize: 13,
+                color: subTab === id ? 'var(--t-text)' : 'var(--t-text-dim)',
+                fontWeight: subTab === id ? 'bold' : 'normal',
+                borderBottom: `2px solid ${subTab === id ? 'var(--t-accent)' : 'transparent'}`,
+              }}
+            >
+              {subTabLabels[id]}
+              {subTabIndicators[id] && (
+                <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--t-accent)', flexShrink: 0 }} />
+              )}
+            </button>
+          ))}
+        </div>
+        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
+
+      {/* 追いかけっこ: chaser/target選択と開始/停止(既存のchase UI) */}
+      {subTab === 'chase' && (
         <div>
           <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)', marginBottom: 8 }}>追いかけっこモード</div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
@@ -809,7 +888,11 @@ export function FleetDashboard({ apiUrl }: Props) {
             )}
           </div>
         </div>
+      )}
 
+      {/* 連携会話: 会話デモパネル(モード切替・機体選択・会場コンテキスト・
+          ライブログ・経過時間) */}
+      {subTab === 'talk' && (
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
             <div style={{ fontSize: 13, fontWeight: 'bold', color: 'var(--t-text-muted)' }}>会話デモ</div>
@@ -933,6 +1016,9 @@ export function FleetDashboard({ apiUrl }: Props) {
             )}
           </div>
         </div>
+      )}
+        </div>
+      </div>
       </div>
     </div>
   );

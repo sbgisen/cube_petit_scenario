@@ -443,7 +443,7 @@ export default function App() {
             {tab === 'system'    && <SystemPanel  namespace={robot.namespace} apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
             {tab === 'map'       && <MapTab       namespace={robot.namespace} apiUrl={apiUrl} />}
             {tab === 'custom'    && <CustomTab    apiUrl={apiUrl} quickPhrases={quickPhrases} setQuickPhrases={setQuickPhrases} />}
-            {tab === 'fleet'     && <FleetDashboard apiUrl={apiUrl} />}
+            {tab === 'fleet'     && <FleetDashboard apiUrl={apiUrl} uiLang={uiLang} />}
           </>
         )}
       </div>
