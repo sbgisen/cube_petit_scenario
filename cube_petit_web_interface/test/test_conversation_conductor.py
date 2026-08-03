@@ -42,11 +42,21 @@ def _wait_until_idle(conductor: conversation_conductor.ConversationConductor, ti
     raise AssertionError('Conductor did not finish within timeout')
 
 
+# Original kept so TestWarmUp can exercise the real implementation even though
+# the autouse fixture below stubs it out for every other test.
+_ORIG_WARM_UP_AMPS = conversation_conductor.ConversationConductor._warm_up_amps  # noqa: SLF001
+
+
 @pytest.fixture(autouse=True)
 def _fast_inter_turn_gap(monkeypatch: pytest.MonkeyPatch) -> None:
     # Real INTER_TURN_GAP_SEC (0.6s) would make every test slow for no benefit;
     # the gap's existence isn't what these tests are checking.
     monkeypatch.setattr(conversation_conductor, 'INTER_TURN_GAP_SEC', 0.0)
+    # The amp warm-up throat-clear (and its 2s wait) would prepend extra speak
+    # commands to zenoh.sent and slow every test; it has its own TestWarmUp
+    # coverage below, so neutralize it everywhere else.
+    monkeypatch.setattr(conversation_conductor, 'WARMUP_WAIT_SEC', 0.0)
+    monkeypatch.setattr(conversation_conductor.ConversationConductor, '_warm_up_amps', lambda self, participants: None)
 
 
 class _StubZenoh:
@@ -455,3 +465,38 @@ class TestVenueContext:
         _wait_until_idle(conductor)
         assert captured
         assert 'テスト用掛け合い会場コンテキスト' in captured[0]
+
+
+class TestWarmUp:
+    """The amp wake-up throat-clear sent to every participant before turn 1."""
+
+    def test_sends_warmup_speak_to_every_participant(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(conversation_conductor, 'WARMUP_WAIT_SEC', 0.0)
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 llm_call=lambda p: _script_json(VALID_SCRIPT))
+        _ORIG_WARM_UP_AMPS(conductor, ['orange', 'pink', 'violet'])
+        assert [(robot, method, args) for robot, method, args, _cid in zenoh.sent] == [
+            ('cube_petit_orange', 'speak', {
+                'text': conversation_conductor.WARMUP_TEXT
+            }),
+            ('cube_petit_pink', 'speak', {
+                'text': conversation_conductor.WARMUP_TEXT
+            }),
+            ('cube_petit_violet', 'speak', {
+                'text': conversation_conductor.WARMUP_TEXT
+            }),
+        ]
+
+    def test_send_failure_does_not_raise(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.setattr(conversation_conductor, 'WARMUP_WAIT_SEC', 0.0)
+
+        def _boom(robot_name: str, method: str, args: dict) -> str:
+            raise RuntimeError('zenoh down')
+
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(_boom,
+                                                                 zenoh.wait_for_completion,
+                                                                 llm_call=lambda p: _script_json(VALID_SCRIPT))
+        _ORIG_WARM_UP_AMPS(conductor, ['orange', 'pink'])
