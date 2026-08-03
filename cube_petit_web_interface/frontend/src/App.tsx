@@ -127,9 +127,9 @@ const STRINGS = {
     tabOperation: '操作',
     tabTalk: '会話',
     tabSystem: 'システム',
-    tabCustom: 'カスタム会話',
-    tabMap: 'カスタムマップ',
-    tabFleet: 'フリート運用',
+    tabCustom: '会話設定',
+    tabMap: 'マップ設定',
+    tabFleet: '複数連携',
   },
   en: {
     settings: 'Settings',
@@ -144,9 +144,9 @@ const STRINGS = {
     tabOperation: 'Operation',
     tabTalk: 'Talk',
     tabSystem: 'System',
-    tabCustom: 'Custom Talk',
-    tabMap: 'Custom Map',
-    tabFleet: 'Fleet Ops',
+    tabCustom: 'Talk Config',
+    tabMap: 'Map Config',
+    tabFleet: 'Fleet',
   },
 } as const satisfies Record<UiLang, Record<string, string>>;
 
@@ -271,7 +271,7 @@ export default function App() {
     }}>
       {/* ヘッダー */}
       <div style={{
-        display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap',
+        display: 'flex', alignItems: 'center', gap: 10,
         padding: 'calc(env(safe-area-inset-top) + 8px) 16px 8px',
         background: 'var(--t-surface)', borderBottom: '1px solid var(--t-border)',
         flexShrink: 0,
@@ -345,21 +345,23 @@ export default function App() {
 
         <div style={{ flex: 1 }} />
 
-        {TABS.map(({ id, labelKey }) => (
-          <button
-            key={id}
-            onClick={() => setTab(id)}
-            style={{
-              padding: '6px 18px', borderRadius: 20, border: 'none', cursor: 'pointer',
-              background: tab === id ? 'var(--t-accent)' : 'var(--t-surface2)', color: 'var(--t-text)', fontSize: 14,
-              // ラベル内で改行させない(「システム」「カスタム会話」が途中で折れて読みにくい)。
-              // 幅が足りないときはヘッダー側のflexWrapでボタン単位に折り返す。
-              whiteSpace: 'nowrap', flexShrink: 0,
-            }}
-          >
-            {t[labelKey]}
-          </button>
-        ))}
+        {/* タブ群: ラベル内でも行間でも折り返さない。幅が足りないときは
+            このコンテナだけ横スクロール(2行目に落とすと縦位置がガタつくため) */}
+        <div style={{ display: 'flex', gap: 8, overflowX: 'auto', flexShrink: 1, minWidth: 0 }}>
+          {TABS.map(({ id, labelKey }) => (
+            <button
+              key={id}
+              onClick={() => setTab(id)}
+              style={{
+                padding: '6px 14px', borderRadius: 20, border: 'none', cursor: 'pointer',
+                background: tab === id ? 'var(--t-accent)' : 'var(--t-surface2)', color: 'var(--t-text)', fontSize: 14,
+                whiteSpace: 'nowrap', flexShrink: 0,
+              }}
+            >
+              {t[labelKey]}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* 設定ドロワー: テーマ/言語(表示設定)+ Tier 2複数ロボット切替(フリート、zenoh経由)。
