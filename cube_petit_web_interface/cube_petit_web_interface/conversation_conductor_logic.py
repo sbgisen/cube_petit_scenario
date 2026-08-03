@@ -51,6 +51,24 @@ import yaml
 #: work"), only used as the default personality-fallback key set.
 DEFAULT_PARTICIPANTS: typing.Tuple[str, ...] = ('orange', 'pink', 'violet')
 
+#: Default venue context injected into both script-mode and interactive-mode
+#: prompts (ROSConJP 2026 booth demo, 2026-08-03 ありさん依頼). Callers can
+#: override this per run via the optional `context` argument to
+#: build_script_prompt()/build_turn_prompt() (wired from
+#: `/fleet/conversation/start`'s optional `context` field, see
+#: routers/conversation_router.py), e.g. to swap topics live at the booth.
+DEFAULT_VENUE_CONTEXT: str = ('ここはROSCon JP 2026(2026年8月4日・5日、茨城県つくば市の「つくばカピオ」)の会場です。'
+                              'ROSコミュニティの年次イベントで、来場者はロボット開発者や研究者、学生が中心です。'
+                              'ブースの前で会話を聞いている人にも届くように、ROSやロボット開発、つくば、'
+                              'このイベント自体の話題を好んで話してください。\n'
+                              'わたしたちキューブプチ(CubePetit)は22cm角・約6.3kgの立方体型パーソナルロボットです。'
+                              'ROS 2 Jazzyで動いていて、LiDARとデプスカメラで自律ナビゲーションをし、'
+                              'LLMでおしゃべりをして、ディスプレイの顔で表情を出します。研究・開発のプラットフォームとして使われていて、'
+                              '今日はorange・pink・violetの3台で来ています。violetは今日は移動せずおしゃべり担当、'
+                              'orangeとpinkは追いかけっこが得意です。\n'
+                              '技術的な話も交えつつ、かわいらしく短い言葉で話してください。誇張したり、'
+                              '実際にはできないことをできると言ったりしないでください。')
+
 #: Facial expressions cube_petit_facial_animation actually supports (see
 #: frontend/src/components/ExpressionGrid.tsx's EXPRESSIONS list in this
 #: package). The zenoh `speak` command has no `face` argument yet (checked
@@ -224,7 +242,9 @@ def load_personalities(participants: typing.Sequence[str], base_dir: Path) -> ty
 # =================================================
 
 
-def build_script_prompt(participants: typing.Sequence[str], personalities: typing.Dict[str, dict]) -> str:
+def build_script_prompt(participants: typing.Sequence[str],
+                        personalities: typing.Dict[str, dict],
+                        context: str = DEFAULT_VENUE_CONTEXT) -> str:
     """Build the one-shot prompt asking the LLM for a full ~1 minute script.
 
     Args:
@@ -232,6 +252,9 @@ def build_script_prompt(participants: typing.Sequence[str], personalities: typin
             'pink', 'violet']``.
         personalities: ``{short_name: personality_dict}`` as returned by
             load_personalities().
+        context: Venue/booth context to ground the conversation in (defaults
+            to DEFAULT_VENUE_CONTEXT, the ROSConJP 2026 booth description).
+            Overridable per run -- see DEFAULT_VENUE_CONTEXT's docstring.
 
     Returns:
         The full prompt text (system + task instructions in one string --
@@ -241,6 +264,10 @@ def build_script_prompt(participants: typing.Sequence[str], personalities: typin
     lines = [
         'あなたは複数台のコミュニケーションロボット「キューブプチ」の掛け合い台本作家です。',
         '以下のロボットたちが、来場者の前で自然に盛り上がる約60秒の会話劇を演じます。',
+        '',
+        '会場の状況:',
+        context,
+        '',
         '各ロボットの性格設定:',
     ]
     for name in participants:
@@ -415,7 +442,8 @@ def build_turn_prompt(participants: typing.Sequence[str],
                       personalities: typing.Dict[str, dict],
                       history: typing.Sequence[dict],
                       elapsed_sec: float,
-                      closing_hint: bool = False) -> str:
+                      closing_hint: bool = False,
+                      context: str = DEFAULT_VENUE_CONTEXT) -> str:
     """Build the one-shot prompt asking the LLM for just the *next* turn.
 
     Unlike build_script_prompt() (whole ~1 minute script in one call),
@@ -435,6 +463,9 @@ def build_turn_prompt(participants: typing.Sequence[str],
             reconstruct timing).
         closing_hint: If True, ask the LLM to start wrapping the
             conversation up (see INTERACTIVE_SOFT_CLOSE_SEC).
+        context: Venue/booth context to ground the conversation in (defaults
+            to DEFAULT_VENUE_CONTEXT, the ROSConJP 2026 booth description).
+            Overridable per run -- see DEFAULT_VENUE_CONTEXT's docstring.
 
     Returns:
         The full prompt text.
@@ -442,6 +473,10 @@ def build_turn_prompt(participants: typing.Sequence[str],
     lines = [
         'あなたは複数台のコミュニケーションロボット「キューブプチ」の会話進行役です。',
         '来場者(人間)とロボットたちが掛け合う対話デモの、次の1ターン分だけを考えます。',
+        '',
+        '会場の状況:',
+        context,
+        '',
         '各ロボットの性格設定:',
     ]
     for name in participants:

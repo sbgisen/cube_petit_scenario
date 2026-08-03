@@ -206,7 +206,8 @@ class ConversationConductor:
     def start(self,
               participants: typing.Sequence[str],
               mode: str = 'script',
-              human_window_sec: typing.Optional[float] = None) -> None:
+              human_window_sec: typing.Optional[float] = None,
+              context: typing.Optional[str] = None) -> None:
         """Start a new run (script or interactive mode).
 
         Args:
@@ -218,6 +219,12 @@ class ConversationConductor:
                 wait for a human utterance after each robot turn (default
                 `conversation_conductor_logic.DEFAULT_HUMAN_WINDOW_SEC`).
                 Ignored in script mode.
+            context: Venue/booth context to ground the LLM prompt in (both
+                modes). Falls back to
+                `conversation_conductor_logic.DEFAULT_VENUE_CONTEXT` (the
+                ROSConJP 2026 booth description) if omitted or blank -- lets
+                the booth operator swap topics live via the frontend's
+                collapsible "会場コンテキスト" textarea without a redeploy.
 
         Raises:
             ConductorError: If a run is already active, `mode` isn't one of
@@ -228,6 +235,7 @@ class ConversationConductor:
         participants = [logic.short_name(p) for p in participants]
         if len(participants) < 2:
             raise ConductorError('Need at least 2 participants for a conversation')
+        resolved_context = context.strip() if context and context.strip() else logic.DEFAULT_VENUE_CONTEXT
 
         with self._lock:
             if self._state['running']:
@@ -250,7 +258,7 @@ class ConversationConductor:
             self._human_window_sec = (human_window_sec
                                       if human_window_sec and human_window_sec > 0 else logic.DEFAULT_HUMAN_WINDOW_SEC)
             target = self._run_script if mode == 'script' else self._run_interactive
-            self._thread = threading.Thread(target=target, args=(participants,), daemon=True)
+            self._thread = threading.Thread(target=target, args=(participants, resolved_context), daemon=True)
             self._thread.start()
 
     def stop(self) -> None:
@@ -312,10 +320,10 @@ class ConversationConductor:
     # Background thread
     # =================================================
 
-    def _run_script(self, participants: typing.List[str]) -> None:
+    def _run_script(self, participants: typing.List[str], context: str) -> None:
         try:
             personalities = logic.load_personalities(participants, self._personality_base_dir)
-            prompt = logic.build_script_prompt(participants, personalities)
+            prompt = logic.build_script_prompt(participants, personalities, context)
             raw = self._llm_call(prompt)
             script = logic.parse_script_response(raw, participants)
         except logic.ScriptError as error:
@@ -339,7 +347,7 @@ class ConversationConductor:
 
         self._finish()
 
-    def _run_interactive(self, participants: typing.List[str]) -> None:
+    def _run_interactive(self, participants: typing.List[str], context: str) -> None:
         """掛け合いモードのメインループ: 1ターン1回LLM呼び出し + 人間の間 + 1分制御."""
         try:
             personalities = logic.load_personalities(participants, self._personality_base_dir)
@@ -367,7 +375,8 @@ class ConversationConductor:
                                              personalities,
                                              history,
                                              elapsed,
-                                             closing_hint=logic.should_inject_closing_hint(elapsed))
+                                             closing_hint=logic.should_inject_closing_hint(elapsed),
+                                             context=context)
             try:
                 raw = self._turn_llm_call(prompt)
                 turn = logic.parse_turn_response(raw, participants)

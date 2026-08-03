@@ -76,6 +76,19 @@ class TestBuildScriptPrompt:
         assert str(logic.TARGET_MIN_TURNS) in prompt
         assert str(logic.TARGET_MAX_TURNS) in prompt
 
+    def test_includes_default_venue_context_when_omitted(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        prompt = logic.build_script_prompt(['orange', 'pink'], personalities)
+        assert logic.DEFAULT_VENUE_CONTEXT in prompt
+        assert 'ROSCon JP 2026' in prompt
+
+    def test_includes_custom_context_instead_of_default(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        custom_context = 'テスト用会場コンテキスト'
+        prompt = logic.build_script_prompt(['orange', 'pink'], personalities, context=custom_context)
+        assert custom_context in prompt
+        assert logic.DEFAULT_VENUE_CONTEXT not in prompt
+
 
 class TestParseScriptResponse:
 
@@ -283,6 +296,19 @@ class TestBuildTurnPrompt:
         personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
         prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0)
         assert 'JSONオブジェクト1つ' in prompt
+
+    def test_includes_default_venue_context_when_omitted(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0)
+        assert logic.DEFAULT_VENUE_CONTEXT in prompt
+        assert 'ROSCon JP 2026' in prompt
+
+    def test_includes_custom_context_instead_of_default(self) -> None:
+        personalities = logic.load_personalities(['orange', 'pink'], Path('/nonexistent'))
+        custom_context = 'テスト用会場コンテキスト'
+        prompt = logic.build_turn_prompt(['orange', 'pink'], personalities, [], 0.0, context=custom_context)
+        assert custom_context in prompt
+        assert logic.DEFAULT_VENUE_CONTEXT not in prompt
 
 
 class TestNormalizeHumanUtterance:

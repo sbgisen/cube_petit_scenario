@@ -364,7 +364,8 @@ def _get_conversation_conductor() -> 'conversation_conductor.ConversationConduct
 
 def start_fleet_conversation(participants: list,
                              mode: str = 'script',
-                             human_window_sec: Optional[float] = None) -> None:
+                             human_window_sec: Optional[float] = None,
+                             context: Optional[str] = None) -> None:
     """会話デモ(指揮者)を開始する.
 
     Args:
@@ -373,12 +374,14 @@ def start_fleet_conversation(participants: list,
         human_window_sec: 掛け合いモードのみ。各ロボット発話後に人間の発話を
             待つ「間」の秒数(省略時はconversation_conductor_logic.
             DEFAULT_HUMAN_WINDOW_SEC)。
+        context: 会場コンテキスト(省略/空文字ならconversation_conductor_logic.
+            DEFAULT_VENUE_CONTEXT=ROSConJP 2026ブース想定の既定文を使う)。
 
     Raises:
         RuntimeError: フリート監視(zenoh)が起動していない場合。
         conversation_conductor.ConductorError: 既に実行中/参加機体不足/未対応モード。
     """
-    _get_conversation_conductor().start(participants, mode, human_window_sec)
+    _get_conversation_conductor().start(participants, mode, human_window_sec, context)
 
 
 def stop_fleet_conversation() -> None:

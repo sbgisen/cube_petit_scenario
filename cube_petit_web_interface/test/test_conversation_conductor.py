@@ -379,3 +379,79 @@ class TestInteractiveMode:
         assert status['running'] is False
         assert 'consecutive' in status['error'].lower()
         assert zenoh.sent == []
+
+
+class TestVenueContext:
+    """ConversationConductor.start()'s optional `context` flows into the LLM prompt.
+
+    See conversation_conductor_logic.DEFAULT_VENUE_CONTEXT / build_script_prompt /
+    build_turn_prompt -- covers ROSConJP 2026 booth context wiring (2026-08-03).
+    """
+
+    def test_script_mode_uses_default_context_when_omitted(self) -> None:
+        captured = {}
+
+        def llm_call(prompt: str) -> str:
+            captured['prompt'] = prompt
+            return _script_json(VALID_SCRIPT)
+
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 llm_call=llm_call)
+        conductor.start(['orange', 'pink', 'violet'])
+        _wait_until_idle(conductor)
+        assert logic.DEFAULT_VENUE_CONTEXT in captured['prompt']
+
+    def test_script_mode_uses_custom_context_when_given(self) -> None:
+        captured = {}
+        custom_context = 'カスタムテスト用会場コンテキスト'
+
+        def llm_call(prompt: str) -> str:
+            captured['prompt'] = prompt
+            return _script_json(VALID_SCRIPT)
+
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 llm_call=llm_call)
+        conductor.start(['orange', 'pink', 'violet'], context=custom_context)
+        _wait_until_idle(conductor)
+        assert custom_context in captured['prompt']
+        assert logic.DEFAULT_VENUE_CONTEXT not in captured['prompt']
+
+    def test_blank_context_falls_back_to_default(self) -> None:
+        captured = {}
+
+        def llm_call(prompt: str) -> str:
+            captured['prompt'] = prompt
+            return _script_json(VALID_SCRIPT)
+
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 llm_call=llm_call)
+        conductor.start(['orange', 'pink', 'violet'], context='   ')
+        _wait_until_idle(conductor)
+        assert logic.DEFAULT_VENUE_CONTEXT in captured['prompt']
+
+    def test_interactive_mode_uses_custom_context_in_turn_prompt(self) -> None:
+        captured: list = []
+
+        def turn_llm(prompt: str) -> str:
+            captured.append(prompt)
+            return _turn_json('orange')
+
+        zenoh = _StubZenoh()
+        conductor = conversation_conductor.ConversationConductor(zenoh.send_command,
+                                                                 zenoh.wait_for_completion,
+                                                                 turn_llm_call=turn_llm)
+        custom_context = 'テスト用掛け合い会場コンテキスト'
+        conductor.start(['orange', 'pink'], mode='interactive', human_window_sec=0.01, context=custom_context)
+        deadline = time.monotonic() + 2.0
+        while not captured and time.monotonic() < deadline:
+            time.sleep(0.01)
+        conductor.stop()
+        _wait_until_idle(conductor)
+        assert captured
+        assert 'テスト用掛け合い会場コンテキスト' in captured[0]

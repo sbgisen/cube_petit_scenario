@@ -61,6 +61,23 @@ const ZOOM_MAX = 10;
 const ZOOM_BUTTON_FACTOR = 1.3;
 const ROTATE_STEP = Math.PI / 4; // 左右回転ボタン1クリック分(45度)
 
+// 会話デモの会場コンテキスト初期表示テキスト。バックエンドの
+// cube_petit_web_interface/conversation_conductor_logic.py の
+// DEFAULT_VENUE_CONTEXT と同内容(省略時にサーバー側で使われるデフォルトと同じ
+// 文面をここでも表示し、当日ブースで話題を編集してから開始できるようにする)。
+const DEFAULT_VENUE_CONTEXT =
+  'ここはROSCon JP 2026(2026年8月4日・5日、茨城県つくば市の「つくばカピオ」)の会場です。' +
+  'ROSコミュニティの年次イベントで、来場者はロボット開発者や研究者、学生が中心です。' +
+  'ブースの前で会話を聞いている人にも届くように、ROSやロボット開発、つくば、' +
+  'このイベント自体の話題を好んで話してください。\n' +
+  'わたしたちキューブプチ(CubePetit)は22cm角・約6.3kgの立方体型パーソナルロボットです。' +
+  'ROS 2 Jazzyで動いていて、LiDARとデプスカメラで自律ナビゲーションをし、' +
+  'LLMでおしゃべりをして、ディスプレイの顔で表情を出します。研究・開発のプラットフォームとして使われていて、' +
+  '今日はorange・pink・violetの3台で来ています。violetは今日は移動せずおしゃべり担当、' +
+  'orangeとpinkは追いかけっこが得意です。\n' +
+  '技術的な話も交えつつ、かわいらしく短い言葉で話してください。誇張したり、' +
+  '実際にはできないことをできると言ったりしないでください。';
+
 export function FleetDashboard({ apiUrl }: Props) {
   const [maps, setMaps] = useState<string[]>([]);
   const [selectedMap, setSelectedMap] = useState('');
@@ -108,6 +125,10 @@ export function FleetDashboard({ apiUrl }: Props) {
   // 1ターン1回LLM呼び出し + orangeマイクのASRテキストを織り込む(バックエンドは
   // conversation_conductor.py の _run_interactive)。
   const [convoMode, setConvoMode] = useState<'script' | 'interactive'>('script');
+  // 会場コンテキスト: 既定文(DEFAULT_VENUE_CONTEXT)を初期表示し、当日ブースで
+  // 話題を差し替えたい時だけ折りたたみを開いて編集する(普段は畳んでおく)。
+  const [convoContext, setConvoContext] = useState(DEFAULT_VENUE_CONTEXT);
+  const [convoContextOpen, setConvoContextOpen] = useState(false);
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000); };
 
@@ -541,7 +562,7 @@ export function FleetDashboard({ apiUrl }: Props) {
   const startConversation = async () => {
     const res = await fetch(`${apiUrl}/fleet/conversation/start`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ participants: convoParticipants, mode: convoMode }),
+      body: JSON.stringify({ participants: convoParticipants, mode: convoMode, context: convoContext }),
     }).then(r => r.json()).catch(() => ({ ok: false, error: '通信エラー' }));
     if (!res.ok) showMsg(`会話デモの開始に失敗: ${res.error ?? ''}`);
   };
@@ -812,6 +833,31 @@ export function FleetDashboard({ apiUrl }: Props) {
                 >{label}</button>
               ))}
             </div>
+          </div>
+          <div style={{ marginBottom: 8 }}>
+            <button
+              onClick={() => setConvoContextOpen(v => !v)}
+              style={{
+                display: 'flex', alignItems: 'center', gap: 4, padding: '2px 0', border: 'none', background: 'none',
+                color: 'var(--t-text-dim)', fontSize: 11, cursor: 'pointer',
+              }}
+            >
+              <Icon name={convoContextOpen ? 'expand_more' : 'chevron_right'} size={14} />
+              会場コンテキスト{convoStatus?.running ? '(実行中は編集できません)' : ''}
+            </button>
+            {convoContextOpen && (
+              <textarea
+                value={convoContext}
+                disabled={!!convoStatus?.running}
+                onChange={e => setConvoContext(e.target.value)}
+                rows={6}
+                style={{
+                  width: '100%', boxSizing: 'border-box', marginTop: 4, padding: 8, borderRadius: 8,
+                  border: '1px solid var(--t-border2)', background: 'var(--t-input-bg)', color: 'var(--t-text)',
+                  fontSize: 12, resize: 'vertical',
+                }}
+              />
+            )}
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
             <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
